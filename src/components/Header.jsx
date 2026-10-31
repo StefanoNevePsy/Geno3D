@@ -1,26 +1,29 @@
 import React, { useRef } from 'react';
 import {
-  Camera,
   Upload,
   Link,
   BookOpen,
-  RotateCcw,
+  Eraser,
   Eye,
   EyeOff,
   Undo2,
   Redo2,
-  Share2
+  Share2,
+  FolderOpen
 } from 'lucide-react';
 import { DEFAULT_PHASES } from '../constants';
 
 export default function Header({
   currentPhaseId,
   onSelectPhase,
+  activePatientName,
+  totalPatientsCount,
+  onOpenPatientsModal,
   linkCount,
   onOpenRelationsModal,
   onOpenExportModal,
   onImportJson,
-  onResetSession,
+  onClearTray,
   onOpenHelpModal,
   isZenMode,
   onToggleZenMode,
@@ -64,64 +67,107 @@ export default function Header({
         pointerEvents: 'none'
       }}
     >
-      {/* Brand & Titolo */}
+      {/* Brand & Selettore Paziente Attivo */}
       <div
-        className="scandi-panel"
         style={{
-          padding: '7px 14px',
           display: 'flex',
           alignItems: 'center',
-          gap: '11px',
+          gap: '8px',
           pointerEvents: 'auto'
         }}
       >
         <div
+          className="scandi-panel"
           style={{
-            width: '28px',
-            height: '28px',
-            borderRadius: '7px',
-            background: 'var(--accent-pine)',
-            color: '#FFFFFF',
+            padding: '7px 14px',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center',
-            fontWeight: 700,
-            fontSize: '12px',
-            letterSpacing: '-0.02em'
+            gap: '11px'
           }}
         >
-          G3
-        </div>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <h1
-              style={{
-                fontSize: '14px',
-                fontWeight: 700,
-                color: 'var(--text-main)',
-                margin: 0,
-                letterSpacing: '-0.01em'
-              }}
-            >
-              Geno 3D
-            </h1>
-            <span
-              style={{
-                fontSize: '10px',
-                padding: '2px 6px',
-                borderRadius: '10px',
-                background: 'var(--accent-pine-light)',
-                color: 'var(--accent-pine)',
-                fontWeight: 600
-              }}
-            >
-              Bassoli &amp; Mariotti
+          <div
+            style={{
+              width: '28px',
+              height: '28px',
+              borderRadius: '7px',
+              background: 'var(--accent-pine)',
+              color: '#FFFFFF',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontWeight: 700,
+              fontSize: '12px',
+              letterSpacing: '-0.02em'
+            }}
+          >
+            G3
+          </div>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <h1
+                style={{
+                  fontSize: '14px',
+                  fontWeight: 700,
+                  color: 'var(--text-main)',
+                  margin: 0,
+                  letterSpacing: '-0.01em'
+                }}
+              >
+                Geno 3D
+              </h1>
+              <span
+                style={{
+                  fontSize: '10px',
+                  padding: '2px 6px',
+                  borderRadius: '10px',
+                  background: 'var(--accent-pine-light)',
+                  color: 'var(--accent-pine)',
+                  fontWeight: 600
+                }}
+              >
+                Bassoli &amp; Mariotti
+              </span>
+            </div>
+            <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block' }}>
+              Genogramma Tridimensionale Sistemico
             </span>
           </div>
-          <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block' }}>
-            Genogramma Tridimensionale Sistemico
-          </span>
         </div>
+
+        {/* Pulsante Archivio Pazienti / Caso Attivo */}
+        {!isZenMode && (
+          <button
+            onClick={onOpenPatientsModal}
+            className="scandi-panel btn-scandi"
+            style={{
+              padding: '8px 13px',
+              borderRadius: 'var(--radius-md)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              fontSize: '12.5px',
+              fontWeight: 600
+            }}
+            title="Gestisci pazienti, crea nuovo genogramma con piatto vuoto o esporta/importa archivio locale"
+          >
+            <FolderOpen size={15} color="var(--accent-pine)" />
+            <span style={{ maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {activePatientName || 'Caso Attivo'}
+            </span>
+            <span
+              style={{
+                background: 'var(--accent-pine-light)',
+                color: 'var(--accent-pine)',
+                fontSize: '10.5px',
+                padding: '1px 6px',
+                borderRadius: '8px',
+                fontWeight: 700
+              }}
+            >
+              {totalPatientsCount}
+            </span>
+          </button>
+        )}
       </div>
 
       {/* Selettore Fasi Temporali (Passato / Presente / Futuro) */}
@@ -197,6 +243,16 @@ export default function Header({
         )}
 
         <button
+          onClick={onClearTray}
+          className="btn-scandi"
+          style={{ padding: '6px 10px', fontSize: '12px' }}
+          title="Svuota il piatto togliendo tutti i pezzi dalla fase corrente"
+        >
+          <Eraser size={14} />
+          <span>Svuota Piatto</span>
+        </button>
+
+        <button
           onClick={onOpenRelationsModal}
           className="btn-scandi"
           style={{ padding: '6px 10px', fontSize: '12px' }}
@@ -234,8 +290,8 @@ export default function Header({
           onClick={() => fileInputRef.current?.click()}
           className="btn-scandi"
           style={{ padding: '6px 8px' }}
-          title="Carica seduta salvata (.JSON)"
-          aria-label="Carica seduta JSON"
+          title="Importa paziente o archivio (.JSON)"
+          aria-label="Importa JSON"
         >
           <Upload size={14} />
         </button>
@@ -246,16 +302,6 @@ export default function Header({
           style={{ display: 'none' }}
           onChange={handleFileChange}
         />
-
-        <button
-          onClick={onResetSession}
-          className="btn-scandi"
-          style={{ padding: '6px 8px' }}
-          title="Ripristina scultura predefinita della fase corrente"
-          aria-label="Ripristina scultura"
-        >
-          <RotateCcw size={14} />
-        </button>
 
         <button
           onClick={onOpenHelpModal}

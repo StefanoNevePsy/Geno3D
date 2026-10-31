@@ -7,6 +7,7 @@ import CameraControlsBar from './components/CameraControlsBar';
 import RelationsModal from './components/RelationsModal';
 import HelpModal from './components/HelpModal';
 import ExportModal from './components/ExportModal';
+import PatientsModal from './components/PatientsModal';
 import {
   INITIAL_PIECES,
   INITIAL_LINKS,
@@ -21,9 +22,10 @@ import {
 } from './utils/physicsUtils';
 import { triggerDownload } from './utils/exportUtils';
 
-const STORAGE_KEY = 'geno3d-session-v2';
+const LEGACY_STORAGE_KEY = 'geno3d-session-v2';
+const ARCHIVE_STORAGE_KEY = 'geno3d-patients-archive-v3';
 
-function createDefaultPhasesData() {
+function createDemoPhasesData() {
   return {
     presente: {
       pieces: stabilizeAllPieces(INITIAL_PIECES),
@@ -40,36 +42,111 @@ function createDefaultPhasesData() {
   };
 }
 
-export default function App() {
-  const [phasesData, setPhasesData] = useState(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed && parsed.presente && Array.isArray(parsed.presente.pieces)) {
-          return {
-            presente: {
-              pieces: stabilizeAllPieces(parsed.presente.pieces),
-              links: parsed.presente.links || []
-            },
-            passato: {
-              pieces: stabilizeAllPieces(parsed.passato?.pieces || INITIAL_PASSATO_PIECES),
-              links: parsed.passato?.links || INITIAL_PASSATO_LINKS
-            },
-            futuro: {
-              pieces: stabilizeAllPieces(parsed.futuro?.pieces || []),
-              links: parsed.futuro?.links || []
-            }
-          };
-        }
-      }
-    } catch {
-      // Fallback ai dati predefiniti
-    }
-    return createDefaultPhasesData();
-  });
+function createEmptyPhasesData() {
+  return {
+    presente: { pieces: [], links: [] },
+    passato: { pieces: [], links: [] },
+    futuro: { pieces: [], links: [] }
+  };
+}
 
-  // Cronologia Undo / Redo
+function sanitizePhasesData(rawPhases) {
+  return {
+    presente: {
+      pieces: stabilizeAllPieces(rawPhases?.presente?.pieces || []),
+      links: Array.isArray(rawPhases?.presente?.links) ? rawPhases.presente.links : []
+    },
+    passato: {
+      pieces: stabilizeAllPieces(rawPhases?.passato?.pieces || []),
+      links: Array.isArray(rawPhases?.passato?.links) ? rawPhases.passato.links : []
+    },
+    futuro: {
+      pieces: stabilizeAllPieces(rawPhases?.futuro?.pieces || []),
+      links: Array.isArray(rawPhases?.futuro?.links) ? rawPhases.futuro.links : []
+    }
+  };
+}
+
+function slugifyFileName(str) {
+  return (str || 'paziente')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'paziente';
+}
+
+function loadInitialArchive() {
+  try {
+    const savedArchive = localStorage.getItem(ARCHIVE_STORAGE_KEY);
+    if (savedArchive) {
+      const parsed = JSON.parse(savedArchive);
+      if (parsed && Array.isArray(parsed.records) && parsed.records.length > 0) {
+        const sanitizedRecords = parsed.records.map((rec) => ({
+          id: rec.id || `patient-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          patientName: rec.patientName || 'Caso Clinico',
+          sessionTitle: rec.sessionTitle || '',
+          sessionNotes: rec.sessionNotes || '',
+          updatedAt: rec.updatedAt || new Date().toISOString(),
+          phasesData: sanitizePhasesData(rec.phasesData)
+        }));
+        const validActiveId = sanitizedRecords.some((r) => r.id === parsed.activeRecordId)
+          ? parsed.activeRecordId
+          : sanitizedRecords[0].id;
+        return {
+          records: sanitizedRecords,
+          activeRecordId: validActiveId
+        };
+      }
+    }
+
+    // Migrazione automatica da eventuale sessione precedente v2
+    const legacySaved = localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (legacySaved) {
+      const parsedLegacy = JSON.parse(legacySaved);
+      if (parsedLegacy && parsedLegacy.presente) {
+        const migratedId = 'patient-migrated-1';
+        return {
+          records: [
+            {
+              id: migratedId,
+              patientName: 'Caso Dimostrativo / Sessione Precedente',
+              sessionTitle: 'Consultazione Sistemica',
+              sessionNotes: '',
+              updatedAt: new Date().toISOString(),
+              phasesData: sanitizePhasesData(parsedLegacy)
+            }
+          ],
+          activeRecordId: migratedId
+        };
+      }
+    }
+  } catch {
+    // Fallback al caso predefinito
+  }
+
+  const defaultId = 'patient-demo-1';
+  return {
+    records: [
+      {
+        id: defaultId,
+        patientName: 'Caso Dimostrativo (Marco)',
+        sessionTitle: 'I Seduta — Consultazione',
+        sessionNotes: 'Esempio precaricato (puoi svuotare il piatto o creare nuovi pazienti)',
+        updatedAt: new Date().toISOString(),
+        phasesData: createDemoPhasesData()
+      }
+    ],
+    activeRecordId: defaultId
+  };
+}
+
+export default function App() {
+  const [archive, setArchive] = useState(loadInitialArchive);
+  const { records, activeRecordId } = archive;
+
+  const activeRecord = records.find((r) => r.id === activeRecordId) || records[0];
+  const phasesData = activeRecord.phasesData;
+
+  // Cronologia Undo / Redo per il genogramma attivo
   const [pastHistory, setPastHistory] = useState([]);
   const [futureHistory, setFutureHistory] = useState([]);
   const isDraggingRef = useRef(false);
@@ -85,20 +162,44 @@ export default function App() {
   const [isRelationsModalOpen, setIsRelationsModalOpen] = useState(false);
   const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [isPatientsModalOpen, setIsPatientsModalOpen] = useState(false);
   const [exportApi, setExportApi] = useState(null);
 
   const currentPhaseData = phasesData[currentPhaseId] || { pieces: [], links: [] };
   const currentPieces = currentPhaseData.pieces;
   const currentLinks = currentPhaseData.links;
 
-  // Salvataggio automatico su localStorage
+  // Salvataggio automatico dell'archivio multi-paziente su localStorage (100% locale)
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(phasesData));
+      localStorage.setItem(ARCHIVE_STORAGE_KEY, JSON.stringify(archive));
     } catch {
       // Ignora errori di quota storage
     }
-  }, [phasesData]);
+  }, [archive]);
+
+  // Helper per aggiornare phasesData del paziente attivo
+  const setPhasesData = useCallback((updaterOrValue) => {
+    setArchive((prevArchive) => {
+      const targetId = prevArchive.activeRecordId;
+      const updatedRecords = prevArchive.records.map((rec) => {
+        if (rec.id !== targetId) return rec;
+        const nextPhasesData =
+          typeof updaterOrValue === 'function'
+            ? updaterOrValue(rec.phasesData)
+            : updaterOrValue;
+        return {
+          ...rec,
+          updatedAt: new Date().toISOString(),
+          phasesData: nextPhasesData
+        };
+      });
+      return {
+        ...prevArchive,
+        records: updatedRecords
+      };
+    });
+  }, []);
 
   // Registra uno stato nella cronologia Undo
   const pushHistorySnapshot = useCallback((snapshot) => {
@@ -117,7 +218,7 @@ export default function App() {
       setPhasesData(previousState);
       return prevPast.slice(0, -1);
     });
-  }, []);
+  }, [setPhasesData]);
 
   const handleRedo = useCallback(() => {
     setFutureHistory((prevFuture) => {
@@ -130,7 +231,7 @@ export default function App() {
       setPhasesData(nextState);
       return prevFuture.slice(1);
     });
-  }, []);
+  }, [setPhasesData]);
 
   const handleDragStart = useCallback(() => {
     isDraggingRef.current = true;
@@ -150,7 +251,11 @@ export default function App() {
   }, [pushHistorySnapshot]);
 
   const handleSelectPhase = (phaseId) => {
-    if (phaseId === 'futuro' && (!phasesData.futuro.pieces || phasesData.futuro.pieces.length === 0)) {
+    if (
+      phaseId === 'futuro' &&
+      (!phasesData.futuro.pieces || phasesData.futuro.pieces.length === 0) &&
+      phasesData.presente.pieces.length > 0
+    ) {
       pushHistorySnapshot(phasesDataRef.current);
       setPhasesData((prev) => ({
         ...prev,
@@ -219,7 +324,7 @@ export default function App() {
         };
       });
     },
-    [currentPhaseId, pushHistorySnapshot]
+    [currentPhaseId, pushHistorySnapshot, setPhasesData]
   );
 
   const handleAddPiece = useCallback(
@@ -256,7 +361,7 @@ export default function App() {
       });
       setSelectedPieceId(id);
     },
-    [currentPhaseId, pushHistorySnapshot]
+    [currentPhaseId, pushHistorySnapshot, setPhasesData]
   );
 
   const handleDuplicatePiece = useCallback(
@@ -295,7 +400,7 @@ export default function App() {
       });
       setSelectedPieceId(newId);
     },
-    [currentPieces, currentPhaseId, pushHistorySnapshot]
+    [currentPieces, currentPhaseId, pushHistorySnapshot, setPhasesData]
   );
 
   const handleDeletePiece = useCallback(
@@ -320,7 +425,7 @@ export default function App() {
         setSelectedPieceId(null);
       }
     },
-    [currentPhaseId, selectedPieceId, pushHistorySnapshot]
+    [currentPhaseId, selectedPieceId, pushHistorySnapshot, setPhasesData]
   );
 
   const handleAddLink = useCallback(
@@ -352,7 +457,7 @@ export default function App() {
         };
       });
     },
-    [currentPhaseId, pushHistorySnapshot]
+    [currentPhaseId, pushHistorySnapshot, setPhasesData]
   );
 
   const handleDeleteLink = useCallback(
@@ -369,64 +474,237 @@ export default function App() {
         };
       });
     },
-    [currentPhaseId, pushHistorySnapshot]
+    [currentPhaseId, pushHistorySnapshot, setPhasesData]
   );
 
-  const handleExportJson = () => {
-    const exportData = {
-      app: 'Geno3D',
-      version: '2.1',
-      createdDate: new Date().toISOString(),
-      currentPhaseId,
-      phasesData
-    };
-    const blob = new Blob([JSON.stringify(exportData, null, 2)], {
-      type: 'application/json'
-    });
-    triggerDownload(blob, `geno3d-seduta-${new Date().toISOString().slice(0, 10)}.json`);
-  };
+  // ============================================================================
+  // PULIZIA PIATTO (SVUOTA TUTTI I PEZZI) E GESTIONE MULTI-PAZIENTE LOCALE
+  // ============================================================================
 
-  const handleImportJson = (data) => {
-    if (data.phasesData) {
-      pushHistorySnapshot(phasesDataRef.current);
-      const stabilizedPhases = {};
-      for (const k of Object.keys(data.phasesData)) {
-        stabilizedPhases[k] = {
-          ...data.phasesData[k],
-          pieces: stabilizeAllPieces(data.phasesData[k].pieces || [])
-        };
+  const handleClearCurrentPhaseTray = useCallback(
+    (askConfirm = false) => {
+      if (currentPieces.length === 0 && currentLinks.length === 0) return;
+      if (
+        askConfirm &&
+        !window.confirm(
+          `Vuoi svuotare il piatto rimuovendo tutti i ${currentPieces.length} pezzi dalla fase "${currentPhaseId.toUpperCase()}"? (Potrai comunque annullare con Ctrl+Z)`
+        )
+      ) {
+        return;
       }
-      setPhasesData(stabilizedPhases);
-      if (data.currentPhaseId) {
-        setCurrentPhaseId(data.currentPhaseId);
-      }
-      setSelectedPieceId(null);
-    }
-  };
-
-  const handleResetSession = () => {
-    if (window.confirm('Vuoi ripristinare la scultura della fase corrente ai valori predefiniti?')) {
       pushHistorySnapshot(phasesDataRef.current);
       setPhasesData((prev) => ({
         ...prev,
         [currentPhaseId]: {
-          pieces:
-            currentPhaseId === 'presente'
-              ? stabilizeAllPieces(INITIAL_PIECES)
-              : currentPhaseId === 'passato'
-              ? stabilizeAllPieces(INITIAL_PASSATO_PIECES)
-              : [],
-          links:
-            currentPhaseId === 'presente'
-              ? INITIAL_LINKS
-              : currentPhaseId === 'passato'
-              ? INITIAL_PASSATO_LINKS
-              : []
+          pieces: [],
+          links: []
         }
       }));
       setSelectedPieceId(null);
+    },
+    [currentPieces.length, currentLinks.length, currentPhaseId, pushHistorySnapshot, setPhasesData]
+  );
+
+  const handleClearAllPhasesTray = useCallback(() => {
+    pushHistorySnapshot(phasesDataRef.current);
+    setPhasesData(createEmptyPhasesData());
+    setSelectedPieceId(null);
+  }, [pushHistorySnapshot, setPhasesData]);
+
+  const handleLoadDemoPreset = useCallback(() => {
+    pushHistorySnapshot(phasesDataRef.current);
+    setPhasesData(createDemoPhasesData());
+    setSelectedPieceId(null);
+  }, [pushHistorySnapshot, setPhasesData]);
+
+  const handleSelectRecord = useCallback((recordId) => {
+    setArchive((prev) => ({
+      ...prev,
+      activeRecordId: recordId
+    }));
+    setPastHistory([]);
+    setFutureHistory([]);
+    setSelectedPieceId(null);
+    setCurrentPhaseId('presente');
+  }, []);
+
+  const handleCreateBlankRecord = useCallback(({ patientName, sessionTitle }) => {
+    const newId = `patient-${Date.now()}`;
+    const newRecord = {
+      id: newId,
+      patientName: patientName || 'Nuovo Paziente',
+      sessionTitle: sessionTitle || `Seduta del ${new Date().toLocaleDateString('it-IT')}`,
+      sessionNotes: '',
+      updatedAt: new Date().toISOString(),
+      phasesData: createEmptyPhasesData()
+    };
+    setArchive((prev) => ({
+      records: [newRecord, ...prev.records],
+      activeRecordId: newId
+    }));
+    setPastHistory([]);
+    setFutureHistory([]);
+    setSelectedPieceId(null);
+    setCurrentPhaseId('presente');
+  }, []);
+
+  const handleDuplicateRecord = useCallback((recordId) => {
+    setArchive((prev) => {
+      const source = prev.records.find((r) => r.id === recordId);
+      if (!source) return prev;
+      const newId = `patient-${Date.now()}`;
+      const duplicated = {
+        ...JSON.parse(JSON.stringify(source)),
+        id: newId,
+        patientName: `${source.patientName} (Copia)`,
+        updatedAt: new Date().toISOString()
+      };
+      return {
+        records: [duplicated, ...prev.records],
+        activeRecordId: newId
+      };
+    });
+    setPastHistory([]);
+    setFutureHistory([]);
+    setSelectedPieceId(null);
+  }, []);
+
+  const handleDeleteRecord = useCallback((recordId) => {
+    setArchive((prev) => {
+      if (prev.records.length <= 1) return prev;
+      const target = prev.records.find((r) => r.id === recordId);
+      if (
+        target &&
+        !window.confirm(`Vuoi eliminare definitivamente il genogramma "${target.patientName}" dal dispositivo?`)
+      ) {
+        return prev;
+      }
+      const remaining = prev.records.filter((r) => r.id !== recordId);
+      const nextActiveId =
+        prev.activeRecordId === recordId ? remaining[0].id : prev.activeRecordId;
+      return {
+        records: remaining,
+        activeRecordId: nextActiveId
+      };
+    });
+    setSelectedPieceId(null);
+  }, []);
+
+  const handleUpdateActiveRecordMeta = useCallback((partialMeta) => {
+    setArchive((prev) => ({
+      ...prev,
+      records: prev.records.map((rec) =>
+        rec.id === prev.activeRecordId
+          ? { ...rec, ...partialMeta, updatedAt: new Date().toISOString() }
+          : rec
+      )
+    }));
+  }, []);
+
+  const handleExportSingleRecord = useCallback(
+    (recordId) => {
+      const target = records.find((r) => r.id === (recordId || activeRecordId)) || activeRecord;
+      if (!target) return;
+      const exportData = {
+        app: 'Geno3D',
+        format: 'single-patient-genogram',
+        version: '3.0',
+        exportedAt: new Date().toISOString(),
+        patientName: target.patientName,
+        sessionTitle: target.sessionTitle,
+        sessionNotes: target.sessionNotes,
+        updatedAt: target.updatedAt,
+        currentPhaseId,
+        phasesData: target.phasesData
+      };
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], {
+        type: 'application/json'
+      });
+      const slug = slugifyFileName(target.patientName);
+      triggerDownload(blob, `geno3d-${slug}-${new Date().toISOString().slice(0, 10)}.json`);
+    },
+    [records, activeRecordId, activeRecord, currentPhaseId]
+  );
+
+  const handleExportAllRecordsArchive = useCallback(() => {
+    const exportData = {
+      app: 'Geno3D',
+      format: 'multi-patient-archive',
+      version: '3.0',
+      exportedAt: new Date().toISOString(),
+      activeRecordId,
+      records
+    };
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], {
+      type: 'application/json'
+    });
+    triggerDownload(
+      blob,
+      `geno3d-archivio-pazienti-${new Date().toISOString().slice(0, 10)}.json`
+    );
+  }, [records, activeRecordId]);
+
+  const handleImportJson = useCallback((data) => {
+    if (!data || typeof data !== 'object') return;
+
+    // Caso 1: Archivio multi-paziente completo
+    if (Array.isArray(data.records) && data.records.length > 0) {
+      const importedRecords = data.records.map((rec, idx) => ({
+        id: rec.id || `patient-imp-${Date.now()}-${idx}`,
+        patientName: rec.patientName || `Paziente Importato ${idx + 1}`,
+        sessionTitle: rec.sessionTitle || '',
+        sessionNotes: rec.sessionNotes || '',
+        updatedAt: rec.updatedAt || new Date().toISOString(),
+        phasesData: sanitizePhasesData(rec.phasesData)
+      }));
+
+      setArchive((prev) => {
+        const existingIds = new Set(prev.records.map((r) => r.id));
+        const merged = [...prev.records];
+        for (const imp of importedRecords) {
+          if (existingIds.has(imp.id)) {
+            const idx = merged.findIndex((r) => r.id === imp.id);
+            merged[idx] = imp;
+          } else {
+            merged.unshift(imp);
+          }
+        }
+        return {
+          records: merged,
+          activeRecordId: importedRecords[0].id
+        };
+      });
+      setPastHistory([]);
+      setFutureHistory([]);
+      setSelectedPieceId(null);
+      return;
     }
-  };
+
+    // Caso 2: Singolo paziente / singola seduta JSON
+    if (data.phasesData) {
+      const newId = `patient-imp-${Date.now()}`;
+      const importedRecord = {
+        id: newId,
+        patientName:
+          data.patientName || `Paziente Importato (${new Date().toLocaleDateString('it-IT')})`,
+        sessionTitle: data.sessionTitle || 'Seduta Importata',
+        sessionNotes: data.sessionNotes || '',
+        updatedAt: data.updatedAt || new Date().toISOString(),
+        phasesData: sanitizePhasesData(data.phasesData)
+      };
+
+      setArchive((prev) => ({
+        records: [importedRecord, ...prev.records],
+        activeRecordId: newId
+      }));
+      if (data.currentPhaseId) {
+        setCurrentPhaseId(data.currentPhaseId);
+      }
+      setPastHistory([]);
+      setFutureHistory([]);
+      setSelectedPieceId(null);
+    }
+  }, []);
 
   // Scorciatoie da tastiera globali:
   // - WASD o Frecce direzionali: sposta il pezzo selezionato sul piano del tavolo (relativo alla telecamera)
@@ -468,7 +746,8 @@ export default function App() {
       const keyLower = e.key.toLowerCase();
 
       if (e.key === 'Escape') {
-        if (isExportModalOpen) setIsExportModalOpen(false);
+        if (isPatientsModalOpen) setIsPatientsModalOpen(false);
+        else if (isExportModalOpen) setIsExportModalOpen(false);
         else if (isRelationsModalOpen) setIsRelationsModalOpen(false);
         else if (isHelpModalOpen) setIsHelpModalOpen(false);
         else if (selectedPieceId) setSelectedPieceId(null);
@@ -612,6 +891,7 @@ export default function App() {
     selectedPieceId,
     currentPieces,
     exportApi,
+    isPatientsModalOpen,
     isExportModalOpen,
     isRelationsModalOpen,
     isHelpModalOpen,
@@ -645,11 +925,14 @@ export default function App() {
       <Header
         currentPhaseId={currentPhaseId}
         onSelectPhase={handleSelectPhase}
+        activePatientName={activeRecord?.patientName}
+        totalPatientsCount={records.length}
+        onOpenPatientsModal={() => setIsPatientsModalOpen(true)}
         linkCount={currentLinks.length}
         onOpenRelationsModal={() => setIsRelationsModalOpen(true)}
         onOpenExportModal={() => setIsExportModalOpen(true)}
         onImportJson={handleImportJson}
-        onResetSession={handleResetSession}
+        onClearTray={() => handleClearCurrentPhaseTray(true)}
         onOpenHelpModal={() => setIsHelpModalOpen(true)}
         isZenMode={isZenMode}
         onToggleZenMode={() => setIsZenMode(!isZenMode)}
@@ -683,6 +966,24 @@ export default function App() {
 
       {!isZenMode && <PieceDrawer onAddPiece={handleAddPiece} />}
 
+      <PatientsModal
+        isOpen={isPatientsModalOpen}
+        onClose={() => setIsPatientsModalOpen(false)}
+        records={records}
+        activeRecordId={activeRecordId}
+        onSelectRecord={handleSelectRecord}
+        onCreateBlankRecord={handleCreateBlankRecord}
+        onDuplicateRecord={handleDuplicateRecord}
+        onUpdateActiveRecordMeta={handleUpdateActiveRecordMeta}
+        onDeleteRecord={handleDeleteRecord}
+        onClearCurrentPhaseTray={() => handleClearCurrentPhaseTray(false)}
+        onClearAllPhasesTray={handleClearAllPhasesTray}
+        onLoadDemoPreset={handleLoadDemoPreset}
+        onExportSingleRecord={handleExportSingleRecord}
+        onExportAllRecordsArchive={handleExportAllRecordsArchive}
+        onImportFile={handleImportJson}
+      />
+
       <RelationsModal
         isOpen={isRelationsModalOpen}
         onClose={() => setIsRelationsModalOpen(false)}
@@ -698,7 +999,7 @@ export default function App() {
         onClose={() => setIsExportModalOpen(false)}
         exportApi={exportApi}
         currentPhaseId={currentPhaseId}
-        onExportJson={handleExportJson}
+        onExportJson={() => handleExportSingleRecord(activeRecordId)}
       />
 
       <HelpModal
