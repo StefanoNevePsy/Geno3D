@@ -907,6 +907,14 @@ export default function GenoCanvas({
     return true;
   };
 
+  const hitPieceId = (excludedId) => {
+    const bodies = [];
+    for (const [id, group] of pieceMeshesRef.current) {
+      if (id !== excludedId) bodies.push(group.children[0].children[0]);
+    }
+    return raycasterRef.current.intersectObjects(bodies, false)[0]?.object.userData.pieceId;
+  };
+
   const handlePointerDown = (e) => {
     if (e.button !== 0 || !e.isPrimary || placementPieceId) return;
     const { left, top } = mountRef.current.getBoundingClientRect();
@@ -928,40 +936,33 @@ export default function GenoCanvas({
       }
     }
 
-    const interactiveMeshes = Array.from(pieceMeshesRef.current.values(), (group) => group.children[0].children[0]);
-
-    const intersects = raycasterRef.current.intersectObjects(interactiveMeshes, false);
-
-    if (intersects.length > 0) {
-      const clickedPieceId = intersects[0].object.userData.pieceId;
-
-      if (clickedPieceId) {
-        if (e.shiftKey && selectedPieceIdRef.current && selectedPieceIdRef.current !== clickedPieceId) {
-          const selPiece = piecesRef.current.find((p) => p.id === selectedPieceIdRef.current);
-          const targetPiece = piecesRef.current.find((p) => p.id === clickedPieceId);
-          if (selPiece && targetPiece) {
-            const angle = Math.atan2(targetPiece.x - selPiece.x, targetPiece.z - selPiece.z);
-            onUpdatePiece(selPiece.id, { rotationY: Math.round(angle * 100) / 100 });
-            return;
-          }
+    const clickedPieceId = hitPieceId();
+    if (clickedPieceId) {
+      if (e.shiftKey && selectedPieceIdRef.current && selectedPieceIdRef.current !== clickedPieceId) {
+        const selPiece = piecesRef.current.find((p) => p.id === selectedPieceIdRef.current);
+        const targetPiece = piecesRef.current.find((p) => p.id === clickedPieceId);
+        if (selPiece && targetPiece) {
+          const angle = Math.atan2(targetPiece.x - selPiece.x, targetPiece.z - selPiece.z);
+          onUpdatePiece(selPiece.id, { rotationY: Math.round(angle * 100) / 100 });
+          return;
         }
+      }
 
-        if (onDragStart) onDragStart();
-        interactionModeRef.current = e.shiftKey ? 'rotate' : 'move';
-        const piece = pieceMeshesRef.current.get(clickedPieceId).userData.piece;
-        const hit = raycasterRef.current.ray.intersectPlane(groundPlaneRef.current, groundHitRef.current);
-        dragOffsetRef.current.x = hit ? piece.x - hit.x : 0;
-        dragOffsetRef.current.z = hit ? piece.z - hit.z : 0;
-        activePieceIdRef.current = clickedPieceId;
-        dragPointerRef.current = e.pointerId;
-        onSelectPiece(clickedPieceId);
+      if (onDragStart) onDragStart();
+      interactionModeRef.current = e.shiftKey ? 'rotate' : 'move';
+      const piece = pieceMeshesRef.current.get(clickedPieceId).userData.piece;
+      const hit = raycasterRef.current.ray.intersectPlane(groundPlaneRef.current, groundHitRef.current);
+      dragOffsetRef.current.x = hit ? piece.x - hit.x : 0;
+      dragOffsetRef.current.z = hit ? piece.z - hit.z : 0;
+      activePieceIdRef.current = clickedPieceId;
+      dragPointerRef.current = e.pointerId;
+      onSelectPiece(clickedPieceId);
 
-        if (controlsRef.current) {
-          controlsRef.current.enabled = false;
-        }
-        if (mountRef.current) {
-          mountRef.current.style.cursor = 'grabbing';
-        }
+      if (controlsRef.current) {
+        controlsRef.current.enabled = false;
+      }
+      if (mountRef.current) {
+        mountRef.current.style.cursor = 'grabbing';
       }
     } else {
       if (e.shiftKey && selectedPieceIdRef.current) {
@@ -1067,9 +1068,10 @@ export default function GenoCanvas({
     if (!updateMouseCoords(event)) return;
     const raycaster = raycasterRef.current;
     raycaster.setFromCamera(mouseRef.current, camera);
-    const hit = raycaster.ray.intersectPlane(groundPlaneRef.current, groundHitRef.current);
-    if (!hit || Math.hypot(hit.x, hit.z) > TRAY_RADIUS) return;
-    const position = calculateDragPosition(hit.x, hit.z, placementPieceId, piecesRef.current);
+    const target = pieceMeshesRef.current.get(hitPieceId(placementPieceId))?.userData.piece;
+    const point = target ?? raycaster.ray.intersectPlane(groundPlaneRef.current, groundHitRef.current);
+    if (!point || Math.hypot(point.x, point.z) > TRAY_RADIUS) return;
+    const position = calculateDragPosition(point.x, point.z, placementPieceId, piecesRef.current);
     onPlacePiece(placementPieceId, position);
   };
 

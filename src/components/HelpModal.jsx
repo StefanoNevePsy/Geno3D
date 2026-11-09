@@ -70,7 +70,7 @@ export default function HelpModal({ isOpen, onClose }) {
             <li>Apri <strong>Aggiungi pezzo</strong> e guarda come cambia l’anteprima mentre scegli forma, altezza e colore.</li>
             <li>Quando ti rappresenta ciò che hai in mente, premi <strong>Aggiungi al piano</strong>.</li>
             <li>Trascina il pezzo, oppure scegli <strong>Sposta</strong> e indica dove metterlo sul piano.</li>
-            <li>Usa <strong>Gira</strong> per orientarlo o <strong>Modifica</strong> per cambiare sguardo, postura e aspetto.</li>
+            <li>Usa <strong>Gira</strong> per orientarlo o <strong>Postura</strong> per inclinarlo o ribaltarlo. Apri <strong>Modifica</strong> per regolare sguardo e aspetto.</li>
           </ol>
         </div>
 
@@ -157,7 +157,7 @@ export default function HelpModal({ isOpen, onClose }) {
             }}
           >
             <li>
-              <strong>Spostamento da Tastiera (WASD / Frecce):</strong> Seleziona un pezzo e usa <code>W A S D</code> oppure le <code>Frecce ↑ ← ↓ →</code> per muoverlo comodamente sul tavolo rispetto alla tua visuale (tieni premuto <code>Shift</code> per passi più ampi).
+              <strong>Spostamento da Tastiera (WASD / Frecce):</strong> Seleziona un pezzo e usa <code>W A S D</code> oppure le <code>Frecce ↑ ← ↓ →</code> per muoverlo rispetto alla tua visuale. Tieni premuto per continuare, aggiungi <code>Shift</code> per accelerare. Per salire sopra un altro pezzo, dirigiti verso il suo centro e rilascia il tasto quando il pezzo è in appoggio.
             </li>
             <li>
               <strong>Rotazione Sguardo (Asse Y):</strong> Usa i tasti <code>Q</code> / <code>E</code>, trascina la <strong>punta della freccia verde</strong> sul tavolo, oppure fai <code>Shift + Clic</code> su un altro membro per guardarlo direttamente.

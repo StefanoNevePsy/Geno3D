@@ -3,6 +3,8 @@ import { Minus, Move, Plus, RotateCw, SlidersHorizontal } from 'lucide-react';
 import GenoCanvas from './components/GenoCanvas';
 import Header from './components/Header';
 import PieceDrawer from './components/PieceDrawer';
+import PiecePosture from './components/PiecePosture';
+import useKeyboardMovement from './hooks/useKeyboardMovement';
 import SelectedPiecePanel from './components/SelectedPiecePanel';
 import CameraControlsBar from './components/CameraControlsBar';
 import RelationsModal from './components/RelationsModal';
@@ -18,8 +20,7 @@ import {
 import {
   findStackedPiecesRecursive,
   stabilizeAllPieces,
-  findFreePositionOnTray,
-  calculateDragPosition
+  findFreePositionOnTray
 } from './utils/physicsUtils';
 import { triggerDownload } from './utils/exportUtils';
 
@@ -161,6 +162,7 @@ export default function App() {
   const [pastHistory, setPastHistory] = useState([]);
   const [futureHistory, setFutureHistory] = useState([]);
   const [dragActive, setDragActive] = useState(false);
+  const [keyboardMoving, setKeyboardMoving] = useState(false);
   const isDraggingRef = useRef(false);
   const preDragSnapshotRef = useRef(null);
   const phasesDataRef = useRef(phasesData);
@@ -247,8 +249,8 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!dragActive) saveArchive();
-  }, [archive, dragActive, saveArchive]);
+    if (!dragActive && !keyboardMoving) saveArchive();
+  }, [archive, dragActive, keyboardMoving, saveArchive]);
 
   useEffect(() => {
     window.addEventListener('pagehide', saveArchive);
@@ -775,6 +777,17 @@ export default function App() {
     }
   }, []);
 
+  useKeyboardMovement({
+    pieceId: selectedPieceId,
+    contextKey: `${activeRecordId}:${currentPhaseId}`,
+    pieces: currentPieces,
+    enabled: !dragActive && !composerOpen && !placementPieceId &&
+      !isPatientsModalOpen && !isExportModalOpen && !isRelationsModalOpen && !isHelpModalOpen,
+    getAxes: exportApi?.getCameraHorizontalAxes,
+    onMove: handleUpdatePiece,
+    onMovingChange: setKeyboardMoving
+  });
+
   // Scorciatoie da tastiera globali:
   // - WASD o Frecce direzionali: sposta il pezzo selezionato sul piano del tavolo (relativo alla telecamera)
   // - Q / E: ruota sguardo a sinistra / destra (asse Y)
@@ -790,6 +803,7 @@ export default function App() {
     };
 
     const handleKeyDown = (e) => {
+      if (e.defaultPrevented) return;
       const tag = document.activeElement?.tagName?.toLowerCase();
       const isInputFocused = tag === 'input' || tag === 'textarea' || tag === 'select';
 
@@ -850,28 +864,6 @@ export default function App() {
       }
 
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-
-      // 1. Movimento sul tavolo con WASD o Frecce Direzionali (relativo alla vista telecamera)
-      let moveFwd = 0;
-      let moveRight = 0;
-      if (keyLower === 'w' || e.key === 'ArrowUp') moveFwd = 1;
-      else if (keyLower === 's' || e.key === 'ArrowDown') moveFwd = -1;
-      else if (keyLower === 'a' || e.key === 'ArrowLeft') moveRight = -1;
-      else if (keyLower === 'd' || e.key === 'ArrowRight') moveRight = 1;
-
-      if (moveFwd !== 0 || moveRight !== 0) {
-        e.preventDefault();
-        const step = e.shiftKey ? 0.65 : 0.25;
-        const axes = exportApi?.getCameraHorizontalAxes
-          ? exportApi.getCameraHorizontalAxes()
-          : { forward: { x: 0, z: -1 }, right: { x: 1, z: 0 } };
-
-        const targetX = piece.x + (axes.forward.x * moveFwd + axes.right.x * moveRight) * step;
-        const targetZ = piece.z + (axes.forward.z * moveFwd + axes.right.z * moveRight) * step;
-        const newPos = calculateDragPosition(targetX, targetZ, selectedPieceId, currentPieces);
-        handleUpdatePiece(selectedPieceId, newPos, e.repeat);
-        return;
-      }
 
       // 2. Rotazione sguardo orizzontale (Q / E)
       const angleStep = e.shiftKey ? Math.PI / 4 : Math.PI / 12;
@@ -963,7 +955,6 @@ export default function App() {
   }, [
     selectedPieceId,
     currentPieces,
-    exportApi,
     isPatientsModalOpen,
     isExportModalOpen,
     isRelationsModalOpen,
@@ -1071,7 +1062,7 @@ export default function App() {
               </div>
               {showPieceTools && (
                 <div className="geno-piece-tools">
-                  {isPlacing && <p role="status">Tocca o fai clic sul piano per spostare il pezzo.</p>}
+                  {isPlacing && <p role="status">Scegli un punto sul piano o un altro pezzo su cui appoggiarlo.</p>}
                   <div className="scandi-panel" role="group" aria-label="Comandi del pezzo selezionato">
                     <button type="button" className="btn-scandi" onClick={startPlacement} aria-pressed={isPlacing}>
                       <Move size={16} aria-hidden="true" /> {isPlacing ? 'Annulla spostamento' : 'Sposta'}
@@ -1079,6 +1070,11 @@ export default function App() {
                     <button type="button" className="btn-scandi" onClick={() => rotateSelected(Math.PI / 4)} title="Gira il pezzo di 45 gradi">
                       <RotateCw size={16} aria-hidden="true" /> Gira
                     </button>
+                    <PiecePosture
+                      compact
+                      piece={selectedPiece}
+                      onChange={(change) => handleUpdatePiece(selectedPiece.id, change)}
+                    />
                     <button
                       ref={inspectorButtonRef}
                       type="button"

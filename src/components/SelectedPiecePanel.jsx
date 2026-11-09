@@ -3,15 +3,7 @@ import { Copy, Link, Move, RotateCcw, RotateCw, Trash2, X } from 'lucide-react';
 import { LINK_TYPES } from '../constants';
 import { findFreePositionOnTray } from '../utils/physicsUtils';
 import PieceAppearanceFields from './PieceAppearanceFields';
-
-const POSTURES = [
-  { label: 'In piedi', x: 0, z: 0 },
-  { label: 'Inclinato in avanti', x: 0.44, z: 0 },
-  { label: 'Inclinato indietro', x: -0.44, z: 0 },
-  { label: 'Sdraiato', x: Math.PI / 2, z: 0 },
-  { label: 'Sul fianco', x: 0, z: Math.PI / 2 },
-  { label: 'Capovolto', x: Math.PI, z: 0 }
-];
+import PiecePosture from './PiecePosture';
 
 const COMMON_NAMES = ['Io', 'Padre', 'Madre', 'Partner', 'Figlio/a', 'Fratello', 'Sorella', 'Nonna', 'Nonno', 'Ex-partner'];
 const toDegrees = (radians) => Math.round(((radians || 0) * 180) / Math.PI);
@@ -36,10 +28,6 @@ export default function SelectedPiecePanel({
   const update = (change) => onUpdatePiece(piece.id, change);
   const others = pieces.filter((other) => other.id !== piece.id);
   const pieceLinks = links.filter((link) => link.sourceId === piece.id || link.targetId === piece.id);
-  const currentPosture = POSTURES.findIndex(({ x, z }) =>
-    Math.abs(x - (piece.rotationX || 0)) < 0.01 && Math.abs(z - (piece.rotationZ || 0)) < 0.01
-  );
-
   const lookToward = (id) => {
     const target = id === 'center' ? { x: 0, z: 0 } : others.find((other) => other.id === id);
     if (!target) return;
@@ -93,20 +81,7 @@ export default function SelectedPiecePanel({
         </select>
       </fieldset>
 
-      <label className="geno-field">
-        <span>Postura</span>
-        <select
-          className="scandi-input"
-          value={currentPosture}
-          onChange={(event) => {
-            const posture = POSTURES[Number(event.target.value)];
-            update({ rotationX: posture.x, rotationZ: posture.z });
-          }}
-        >
-          <option value={-1} disabled>Personalizzata</option>
-          {POSTURES.map(({ label }, index) => <option key={label} value={index}>{label}</option>)}
-        </select>
-      </label>
+      <PiecePosture piece={piece} onChange={update} />
 
       {(piece.y || 0) > 0.05 && (
         <button

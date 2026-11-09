@@ -862,3 +862,42 @@ input[type="range"]::-webkit-slider-thumb:hover {
 
 .geno-help-basics h3 { font-size: 15px; }
 .geno-help-basics ol { padding-left: 20px; color: var(--text-muted); }
+
+.geno-posture-menu {
+  position: relative;
+  min-height: 38px;
+  white-space: nowrap;
+}
+
+.geno-posture-menu:focus-within {
+  outline: 2px solid var(--accent-pine);
+  outline-offset: 2px;
+}
+
+.geno-posture-menu select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.geno-posture-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.geno-posture-grid .btn-scandi { min-height: 35px; padding: 4px 6px; }
+.geno-posture-grid [aria-pressed='true'] {
+  background: var(--accent-pine-light);
+  border-color: var(--border-active);
+  color: var(--accent-pine);
+}
+
+@media (max-width: 425px) {
+  .geno-piece-tools .scandi-panel { gap: 3px; }
+  .geno-piece-tools .btn-scandi { gap: 4px; padding-inline: 6px; font-size: 12px; }
+  .geno-piece-tools .btn-scandi svg { width: 14px; flex-shrink: 0; }
+  .geno-piece-tools .btn-scandi[aria-pressed='true'] { white-space: normal; }
+}
