@@ -575,6 +575,8 @@ input[type="range"]::-webkit-slider-thumb:hover {
 
 @media (max-width: 360px) {
   .geno-export-label { display: none; }
+  .geno-actions { gap: 2px; }
+  .geno-actions .btn-scandi { padding-inline: 6px !important; }
 }
 
 .geno-theme-toggle { min-height: 36px; padding: 5px 9px; }
