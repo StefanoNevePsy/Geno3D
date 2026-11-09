@@ -92,7 +92,7 @@ export default function PatientsModal({
       style={{
         position: 'fixed',
         inset: 0,
-        backgroundColor: 'rgba(25, 30, 27, 0.48)',
+        backgroundColor: 'var(--overlay)',
         backdropFilter: 'blur(6px)',
         zIndex: 1100,
         display: 'flex',
@@ -146,7 +146,7 @@ export default function PatientsModal({
         {activeRecord && (
           <div
             style={{
-              background: '#FAF8F4',
+              background: 'var(--surface-muted)',
               border: '1px solid var(--border-light)',
               borderRadius: '12px',
               padding: '16px',
@@ -254,7 +254,7 @@ export default function PatientsModal({
             gridTemplateColumns: '1fr 1fr auto',
             gap: '10px',
             alignItems: 'end',
-            background: '#FFFFFF',
+            background: 'var(--bg-elevated)',
             border: '1px solid var(--border-light)',
             borderRadius: '12px',
             padding: '14px 16px'
@@ -351,7 +351,7 @@ export default function PatientsModal({
                     padding: '10px 14px',
                     borderRadius: '10px',
                     border: `1.5px solid ${isCurrent ? 'var(--accent-pine)' : 'var(--border-light)'}`,
-                    background: isCurrent ? 'var(--accent-pine-light)' : '#FFFFFF'
+                    background: isCurrent ? 'var(--accent-pine-light)' : 'var(--bg-elevated)'
                   }}
                 >
                   <div
@@ -378,7 +378,7 @@ export default function PatientsModal({
                             padding: '1px 7px',
                             borderRadius: '8px',
                             background: 'var(--accent-pine)',
-                            color: '#FFFFFF'
+                            color: 'var(--text-inverse)'
                           }}
                         >
                           Attivo

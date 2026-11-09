@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useCallback } from 'react';
+import { flushSync } from 'react-dom';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import {
@@ -13,13 +14,114 @@ import {
   calculateDragPosition,
   getPieceDimensions
 } from '../utils/physicsUtils';
-import { CAMERA_PROJECTIONS } from '../constants';
+import { CAMERA_PROJECTIONS, TRAY_RADIUS, TRAY_VIEW_SCALE } from '../constants';
 import {
+  computePiecesBounds,
   renderProjectionToCanvas,
   renderMultiProjectionSheet,
   exportScene3D,
   triggerDownload
 } from '../utils/exportUtils';
+
+const STUDIO_VIEW = CAMERA_PROJECTIONS.find((view) => view.id === 'perspective');
+
+function disposeLink(group) {
+  group.traverse((child) => {
+    child.geometry?.dispose();
+    child.material?.dispose();
+  });
+}
+
+function updatePinInstances(scene, instances, groups) {
+  if (groups.size === 0) {
+    instances.forEach((mesh) => { mesh.count = 0; });
+    return;
+  }
+
+  if (instances.length === 0 || instances[0].instanceMatrix.count < groups.size) {
+    instances.forEach((mesh) => {
+      scene.remove(mesh);
+      mesh.dispose();
+    });
+    const sample = groups.values().next().value.getObjectByName('front-dot');
+    const capacity = 2 ** Math.ceil(Math.log2(groups.size));
+    instances.splice(0, instances.length, ...sample.children.map(({ geometry, material }) => {
+      const mesh = new THREE.InstancedMesh(geometry, material, capacity);
+      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      mesh.frustumCulled = false;
+      scene.add(mesh);
+      return mesh;
+    }));
+  }
+
+  let index = 0;
+  for (const group of groups.values()) {
+    const pin = group.getObjectByName('front-dot');
+    pin.children.forEach((child, part) => instances[part].setMatrixAt(index, child.matrixWorld));
+    index++;
+  }
+  instances.forEach((mesh) => {
+    mesh.count = groups.size;
+    mesh.instanceMatrix.needsUpdate = true;
+  });
+}
+
+function createStudioLights(scene, scale = 1) {
+  const ambient = new THREE.HemisphereLight('#FFFDF9', '#D6CEC0', 0.98);
+  const key = new THREE.DirectionalLight('#FFF8EC', 1.38);
+  key.position.set(11, 21, 13).multiplyScalar(scale);
+  const fill = new THREE.DirectionalLight('#E2EAF2', 0.48);
+  fill.position.set(-13, 11, -9);
+  scene.add(ambient, key, fill);
+  return key;
+}
+
+function createPiecePreview() {
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color();
+  createStudioLights(scene);
+  const camera = new THREE.OrthographicCamera(-2.8, 2.8, 2, -2, 0.1, 30);
+  camera.position.set(4.5, 3.8, 8);
+  const viewDirection = camera.position.clone().sub(new THREE.Vector3(0, 1.55, 0));
+  const pieceGroup = new THREE.Group();
+  const body = new THREE.Mesh(createPieceGeometry('box', 'medium'), getPieceMaterial('ash'));
+  pieceGroup.add(body);
+  scene.add(pieceGroup);
+  return { scene, camera, viewDirection, pieceGroup, body };
+}
+
+function drawPiecePreview(renderer, preview, { piece, canvas }, isDark) {
+  const { scene, camera, viewDirection, pieceGroup, body } = preview;
+  const context = canvas.getContext('2d');
+  if (!context) return;
+
+  body.geometry = createPieceGeometry(piece.shape, piece.size);
+  body.material = getPieceMaterial(piece.color);
+  updateGazePinOnGroup(pieceGroup, piece);
+  // L'inquadratura è costante per forma, così le tre altezze restano confrontabili.
+  const flat = piece.shape === 'token';
+  const compact = piece.shape === 'cube' || piece.shape === 'sphere';
+  const centerY = flat ? 0.18 : compact ? 1.15 : 1.55;
+  camera.zoom = flat ? 1.7 : compact ? 1.22 : 1;
+  camera.position.copy(viewDirection);
+  camera.position.y += centerY;
+  camera.lookAt(0, centerY, 0);
+  camera.updateProjectionMatrix();
+  scene.background.set(isDark ? '#242D27' : '#EEE9DF');
+
+  const size = renderer.getSize(new THREE.Vector2());
+  const ratio = renderer.getPixelRatio();
+  const shadows = renderer.shadowMap.enabled;
+  try {
+    renderer.shadowMap.enabled = false;
+    renderer.setDrawingBufferSize(canvas.width, canvas.height, 1);
+    renderer.render(scene, camera);
+    context.drawImage(renderer.domElement, 0, 0);
+  } finally {
+    renderer.shadowMap.enabled = shadows;
+    renderer.setDrawingBufferSize(size.x, size.y, ratio);
+  }
+}
 
 export default function GenoCanvas({
   pieces,
@@ -33,9 +135,11 @@ export default function GenoCanvas({
   showLabels = true,
   cameraView = null,
   onCameraViewHandled,
-  onRegisterExportApi
+  onRegisterExportApi,
+  isDark,
+  placementPieceId,
+  onPlacePiece
 }) {
-  const wrapperRef = useRef(null);
   const mountRef = useRef(null);
   const sceneRef = useRef(null);
   const cameraRef = useRef(null);
@@ -53,6 +157,11 @@ export default function GenoCanvas({
 
   // Mappe oggetti 3D
   const pieceMeshesRef = useRef(new Map());
+  const pinInstancesRef = useRef([]);
+  const previewRequestRef = useRef(null);
+  const darkRef = useRef(isDark);
+  darkRef.current = isDark;
+  const cameraAnimationRef = useRef(null);
   const linkMeshesRef = useRef(new Map());
   const gazeIndicatorRef = useRef(null);
   const gazeHandleMeshRef = useRef(null);
@@ -71,12 +180,23 @@ export default function GenoCanvas({
   // Gestione Drag & Drop e stato Orbit
   const interactionModeRef = useRef(null); // 'move' | 'rotate' | null
   const activePieceIdRef = useRef(null);
+  const dragPointerRef = useRef(null);
+  const dragOffsetRef = useRef({ x: 0, z: 0 });
+  const pendingDragRef = useRef(null);
+  const dragFrameRef = useRef(null);
   const isOrbitingRef = useRef(false);
   const lastHoverCheckTimeRef = useRef(0);
   const hoverCursorRef = useRef('default');
-  const raycasterRef = useRef(new THREE.Raycaster());
-  const mouseRef = useRef(new THREE.Vector2());
-  const groundPlaneRef = useRef(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0));
+  const raycasterRef = useRef(null);
+  const mouseRef = useRef(null);
+  const groundPlaneRef = useRef(null);
+  const groundHitRef = useRef(null);
+  const labelPointRef = useRef(null);
+  raycasterRef.current ??= new THREE.Raycaster();
+  mouseRef.current ??= new THREE.Vector2();
+  groundPlaneRef.current ??= new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  groundHitRef.current ??= new THREE.Vector3();
+  labelPointRef.current ??= new THREE.Vector3();
 
   // Funzione per risvegliare il render loop on-demand
   const wakeUpRenderRef = useRef(() => {});
@@ -92,21 +212,21 @@ export default function GenoCanvas({
     camera.updateMatrixWorld();
 
     const currentPieces = piecesRef.current || [];
-    const tempVec = new THREE.Vector3();
+    const tempVec = labelPointRef.current;
 
     for (const p of currentPieces) {
       const domEl = labelDomMapRef.current.get(p.id);
       if (!domEl) continue;
 
-      const dims = getPieceDimensions(p);
-      tempVec.set(p.x, (p.y || 0) + dims.height + 0.42, p.z);
+      const mesh = pieceMeshesRef.current.get(p.id);
+      if (!mesh) continue;
+      tempVec.copy(mesh.userData.labelPosition);
       tempVec.project(camera);
 
-      if (tempVec.z > 1 || tempVec.z < -1) {
+      if (tempVec.z > 1 || tempVec.z < -1 || Math.abs(tempVec.x) > 1.1 || Math.abs(tempVec.y) > 1.1) {
         if (domEl._lastVis !== false) {
           domEl._lastVis = false;
-          domEl.style.opacity = '0';
-          domEl.style.pointerEvents = 'none';
+          domEl.style.visibility = 'hidden';
         }
       } else {
         const tx = Math.round(((tempVec.x + 1) * width) * 5) / 10;
@@ -114,8 +234,7 @@ export default function GenoCanvas({
 
         if (domEl._lastVis !== true) {
           domEl._lastVis = true;
-          domEl.style.opacity = '1';
-          domEl.style.pointerEvents = 'auto';
+          domEl.style.visibility = 'visible';
         }
         if (domEl._lastTx !== tx || domEl._lastTy !== ty) {
           domEl._lastTx = tx;
@@ -142,9 +261,11 @@ export default function GenoCanvas({
     sceneRef.current = scene;
 
     // CAMERA
-    const camera = new THREE.PerspectiveCamera(38, width / height, 0.1, 100);
-    camera.position.set(0, 13.5, 15.5);
-    camera.lookAt(0, 0.5, 0);
+    const camera = new THREE.PerspectiveCamera(38, width / height, 0.1, 400);
+    const studioTarget = new THREE.Vector3(...STUDIO_VIEW.target);
+    camera.position.set(...STUDIO_VIEW.position).sub(studioTarget)
+      .multiplyScalar(TRAY_VIEW_SCALE / Math.min(camera.aspect, 1)).add(studioTarget);
+    camera.lookAt(studioTarget);
     camera.updateProjectionMatrix();
     camera.updateMatrixWorld();
     cameraRef.current = camera;
@@ -152,10 +273,13 @@ export default function GenoCanvas({
     // RENDERER OTTIMIZZATO (senza preserveDrawingBuffer per doppio buffering nativo veloce su macOS/Retina)
     const renderer = new THREE.WebGLRenderer({
       antialias: true,
-      powerPreference: 'high-performance'
+      powerPreference: 'low-power'
     });
-    renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.65));
+    const sizeRenderer = (w, h) => {
+      const ratio = Math.min(window.devicePixelRatio || 1, 1.5, Math.sqrt(2_800_000 / (w * h)));
+      renderer.setDrawingBufferSize(w, h, ratio);
+    };
+    sizeRenderer(width, height);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.shadowMap.autoUpdate = false;
@@ -173,42 +297,31 @@ export default function GenoCanvas({
     controls.dampingFactor = 0.15;
     controls.maxPolarAngle = Math.PI / 2 - 0.03;
     controls.minDistance = 4;
-    controls.maxDistance = 36;
-    controls.target.set(0, 0.5, 0);
+    controls.maxDistance = 160;
+    controls.target.copy(studioTarget);
     controls.update();
     controlsRef.current = controls;
 
-    // ILLUMINAZIONE SCANDINAVA DA STUDIO
-    const hemiLight = new THREE.HemisphereLight('#FFFDF9', '#D6CEC0', 0.98);
-    scene.add(hemiLight);
-
-    const dirLight = new THREE.DirectionalLight('#FFF8EC', 1.38);
-    dirLight.position.set(11, 21, 13);
+    const dirLight = createStudioLights(scene, TRAY_VIEW_SCALE);
     dirLight.castShadow = true;
     dirLight.shadow.mapSize.width = 1024;
     dirLight.shadow.mapSize.height = 1024;
     dirLight.shadow.camera.near = 4;
-    dirLight.shadow.camera.far = 38;
+    dirLight.shadow.camera.far = 90;
     dirLight.shadow.bias = -0.0005;
     dirLight.shadow.normalBias = 0.02;
-    const d = 10.5;
+    const d = TRAY_RADIUS + 2;
     dirLight.shadow.camera.left = -d;
     dirLight.shadow.camera.right = d;
     dirLight.shadow.camera.top = d;
     dirLight.shadow.camera.bottom = -d;
-    scene.add(dirLight);
-
-    const fillLight = new THREE.DirectionalLight('#E2EAF2', 0.48);
-    fillLight.position.set(-13, 11, -9);
-    scene.add(fillLight);
-
     // TAVOLO IN LEGNO DI FRASSINO (Vassoio scandinavo tornito)
     const trayGroup = new THREE.Group();
     trayGroup.name = 'TrayGroup';
-    const trayRadius = 9.5;
+    const trayRadius = TRAY_RADIUS;
     const trayHeight = 0.38;
 
-    const trayGeo = new THREE.CylinderGeometry(trayRadius, trayRadius * 0.98, trayHeight, 64);
+    const trayGeo = new THREE.CylinderGeometry(trayRadius, trayRadius * 0.98, trayHeight, 96);
     const trayTexture = createTrayWoodTexture();
     const trayMat = new THREE.MeshStandardMaterial({
       map: trayTexture,
@@ -230,7 +343,7 @@ export default function GenoCanvas({
       new THREE.Vector2(trayRadius - 0.18, 0.12),
       new THREE.Vector2(trayRadius - 0.22, 0)
     ];
-    const rimGeo = new THREE.LatheGeometry(rimPoints, 64);
+    const rimGeo = new THREE.LatheGeometry(rimPoints, 96);
     const rimMat = new THREE.MeshStandardMaterial({
       color: '#CBB89D',
       roughness: 0.55,
@@ -315,38 +428,53 @@ export default function GenoCanvas({
     scene.add(gazeGroup);
     gazeIndicatorRef.current = gazeGroup;
 
-    // Ricollega eventuali mesh già presenti nelle mappe
-    pieceMeshesRef.current.forEach((mesh) => {
-      if (mesh.parent !== scene) scene.add(mesh);
-    });
-    linkMeshesRef.current.forEach((mesh) => {
-      if (mesh.parent !== scene) scene.add(mesh);
-    });
-
-    // CICLO DI RENDERING AD EFFICIENZA ENERGETICA (Fluido a 60fps in movimento, 0% a riposo)
+    // Un solo fotogramma per modifica; lo smorzamento riattiva il disegno finché la vista si muove.
     let isDisposed = false;
     let animFrameId = null;
-    let keepAliveUntil = performance.now() + 500;
+    let viewportChanged = false;
+    let preview = null;
+    const lightBackground = scene.background;
+    const darkBackground = new THREE.Color('#1D2520');
+    const lightFloor = floorMat.color.clone();
+    const darkFloor = new THREE.Color('#141914');
 
     const loop = (now) => {
       animFrameId = null;
-      if (isDisposed) return;
+      if (document.hidden) return;
 
-      if (!document.hidden) {
-        controls.update();
+      if (viewportChanged) {
+        const { width: w, height: h } = boundsRef.current;
+        sizeRenderer(w, h);
+        viewportChanged = false;
+      }
+
+      if (previewRequestRef.current) {
+        const request = previewRequestRef.current;
+        previewRequestRef.current = null;
+        preview ??= createPiecePreview();
+        drawPiecePreview(renderer, preview, request, darkRef.current);
+      }
+
+      cameraAnimationRef.current?.(now);
+      if (controls.enabled) controls.update();
+      if (darkRef.current) {
+        scene.background = darkBackground;
+        trayMat.color.set('#9C907F');
+        rimMat.color.set('#98846A');
+        floorMat.color.copy(darkFloor);
         renderer.render(scene, camera);
-        updateLabelsPositionDOM();
+        scene.background = lightBackground;
+        trayMat.color.set('#FFFFFF');
+        rimMat.color.set('#CBB89D');
+        floorMat.color.copy(lightFloor);
+      } else {
+        renderer.render(scene, camera);
       }
-
-      if ((now < keepAliveUntil || isOrbitingRef.current) && !document.hidden) {
-        animFrameId = requestAnimationFrame(loop);
-      }
+      updateLabelsPositionDOM();
     };
 
-    const wakeUpRender = (durationMs = 450) => {
-      if (isDisposed) return;
-      keepAliveUntil = Math.max(keepAliveUntil, performance.now() + durationMs);
-      if (animFrameId === null && !document.hidden) {
+    const wakeUpRender = () => {
+      if (!isDisposed && animFrameId === null && !document.hidden) {
         animFrameId = requestAnimationFrame(loop);
       }
     };
@@ -355,65 +483,62 @@ export default function GenoCanvas({
 
     const onControlsStart = () => {
       isOrbitingRef.current = true;
-      wakeUpRender(450);
+      cameraAnimationRef.current = null;
     };
-    const onControlsChange = () => {
-      wakeUpRender(450);
-    };
-    const onControlsEnd = () => {
-      isOrbitingRef.current = false;
-      wakeUpRender(450);
-    };
+    const onControlsEnd = () => { isOrbitingRef.current = false; };
 
     controls.addEventListener('start', onControlsStart);
-    controls.addEventListener('change', onControlsChange);
+    controls.addEventListener('change', wakeUpRender);
     controls.addEventListener('end', onControlsEnd);
 
     const handleResize = () => {
-      if (!container || isDisposed) return;
-      const r = container.getBoundingClientRect();
-      const w = r.width || window.innerWidth;
-      const h = r.height || window.innerHeight;
-      if (w === 0 || h === 0) return;
-      boundsRef.current = { left: r.left, top: r.top, width: w, height: h };
-      camera.aspect = w / h;
-      camera.updateProjectionMatrix();
-      renderer.setSize(w, h);
-      renderer.render(scene, camera);
-      updateLabelsPositionDOM();
+      const { left, top, width: w, height: h } = container.getBoundingClientRect();
+      if (!w || !h) return;
+      const previous = boundsRef.current;
+      boundsRef.current = { left, top, width: w, height: h };
+      if (w !== previous.width || h !== previous.height) {
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+      }
+      viewportChanged = true;
+      wakeUpRender();
     };
 
-    const resizeObserver = typeof ResizeObserver !== 'undefined'
-      ? new ResizeObserver(() => handleResize())
-      : null;
-    if (resizeObserver) {
-      resizeObserver.observe(container);
-    }
-
-    const handleVisibilityChange = () => {
-      if (!document.hidden) wakeUpRender(400);
-    };
+    const resizeObserver = new ResizeObserver(handleResize);
+    resizeObserver.observe(container);
 
     window.addEventListener('resize', handleResize);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    renderer.render(scene, camera);
-    updateLabelsPositionDOM();
-    wakeUpRender(500);
+    document.addEventListener('visibilitychange', wakeUpRender);
+    const handleContextRestore = () => {
+      renderer.shadowMap.autoUpdate = false;
+      renderer.shadowMap.needsUpdate = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      wakeUpRender();
+    };
+    renderer.domElement.addEventListener('webglcontextrestored', handleContextRestore);
+    wakeUpRender();
 
     return () => {
       isDisposed = true;
       if (animFrameId !== null) {
         cancelAnimationFrame(animFrameId);
       }
-      if (resizeObserver) {
-        resizeObserver.disconnect();
-      }
+      if (dragFrameRef.current !== null) cancelAnimationFrame(dragFrameRef.current);
+      cameraAnimationRef.current = null;
+      dragFrameRef.current = null;
+      resizeObserver.disconnect();
       controls.removeEventListener('start', onControlsStart);
-      controls.removeEventListener('change', onControlsChange);
+      controls.removeEventListener('change', wakeUpRender);
       controls.removeEventListener('end', onControlsEnd);
       window.removeEventListener('resize', handleResize);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      document.removeEventListener('visibilitychange', wakeUpRender);
+      renderer.domElement.removeEventListener('webglcontextrestored', handleContextRestore);
+      pinInstancesRef.current.forEach((mesh) => mesh.dispose());
+      pinInstancesRef.current.length = 0;
+      linkMeshesRef.current.forEach(disposeLink);
+      linkMeshesRef.current.clear();
+      pieceMeshesRef.current.clear();
+      dirLight.shadow.dispose();
       controls.dispose();
       trayGeo.dispose();
       trayMat.dispose();
@@ -438,163 +563,132 @@ export default function GenoCanvas({
     };
   }, [updateLabelsPositionDOM]);
 
-  // SINCRONIZZAZIONE PEZZI 3D (con supporto per rotazione 3D completa: rotationY, rotationX, rotationZ)
+  // Sincronizza solo i pezzi modificati e raggruppa gli intarsi in due draw call.
   useEffect(() => {
     const scene = sceneRef.current;
     const renderer = rendererRef.current;
-    const camera = cameraRef.current;
-    if (!scene) return;
-
+    if (!scene || !renderer) return;
     const currentMeshes = pieceMeshesRef.current;
-    const activePieceIds = new Set(pieces.map((p) => p.id));
+    const activePieceIds = new Set(pieces.map((piece) => piece.id));
+    let transformsChanged = false;
 
-    for (const [id, mesh] of currentMeshes.entries()) {
+    for (const [id, mesh] of currentMeshes) {
       if (!activePieceIds.has(id)) {
         scene.remove(mesh);
         currentMeshes.delete(id);
+        transformsChanged = true;
       }
     }
 
-    pieces.forEach((piece) => {
+    for (const piece of pieces) {
       const isSelected = piece.id === selectedPieceId;
-      let meshGroup = currentMeshes.get(piece.id);
+      let group = currentMeshes.get(piece.id);
+      const previous = group?.userData.piece;
+      if (previous === piece && group.userData.isSelected === isSelected) continue;
 
-      if (!meshGroup) {
-        meshGroup = new THREE.Group();
-        meshGroup.userData = {
-          pieceId: piece.id,
-          shape: piece.shape,
-          size: piece.size,
-          color: piece.color
-        };
-
-        const tiltPivot = new THREE.Group();
-        tiltPivot.name = 'tilt-pivot';
-
-        const geo = createPieceGeometry(piece.shape, piece.size);
-        const mat = getPieceMaterial(piece.color, isSelected);
-        const mainMesh = new THREE.Mesh(geo, mat);
-        mainMesh.castShadow = true;
-        mainMesh.receiveShadow = true;
-        mainMesh.name = 'piece-body';
-        mainMesh.userData = { pieceId: piece.id };
-        tiltPivot.add(mainMesh);
-
-        updateGazePinOnGroup(tiltPivot, piece);
-        meshGroup.add(tiltPivot);
-
-        scene.add(meshGroup);
-        currentMeshes.set(piece.id, meshGroup);
-      } else {
-        if (meshGroup.parent !== scene) {
-          scene.add(meshGroup);
-        }
-        const tiltPivot = meshGroup.getObjectByName('tilt-pivot') || meshGroup;
-        const mainMesh = tiltPivot.getObjectByName('piece-body');
-        if (mainMesh) {
-          if (
-            meshGroup.userData.shape !== piece.shape ||
-            meshGroup.userData.size !== piece.size
-          ) {
-            mainMesh.geometry = createPieceGeometry(piece.shape, piece.size);
-            meshGroup.userData.shape = piece.shape;
-            meshGroup.userData.size = piece.size;
-            updateGazePinOnGroup(tiltPivot, piece);
-          }
-
-          mainMesh.material = getPieceMaterial(piece.color, isSelected);
-          meshGroup.userData.color = piece.color;
-        }
+      if (!group) {
+        group = new THREE.Group();
+        group.userData.labelPosition = new THREE.Vector3();
+        const pivot = new THREE.Group();
+        pivot.name = 'tilt-pivot';
+        const body = new THREE.Mesh(
+          createPieceGeometry(piece.shape, piece.size),
+          getPieceMaterial(piece.color, isSelected)
+        );
+        body.castShadow = true;
+        body.receiveShadow = true;
+        body.name = 'piece-body';
+        body.userData.pieceId = piece.id;
+        pivot.add(body);
+        group.add(pivot);
+        scene.add(group);
+        currentMeshes.set(piece.id, group);
       }
 
-      applyPieceTransform3D(meshGroup, piece);
-    });
+      const pivot = group.children[0];
+      const body = pivot.children[0];
+      const shapeChanged = previous?.shape !== piece.shape || previous?.size !== piece.size || !previous;
+      if (shapeChanged) {
+        body.geometry = createPieceGeometry(piece.shape, piece.size);
+        updateGazePinOnGroup(pivot, piece);
+        pivot.getObjectByName('front-dot').visible = false;
+      }
+      if (previous?.color !== piece.color || group.userData.isSelected !== isSelected) {
+        body.material = getPieceMaterial(piece.color, isSelected);
+      }
+
+      if (shapeChanged || previous.x !== piece.x || previous.y !== piece.y || previous.z !== piece.z ||
+        previous.rotationX !== piece.rotationX || previous.rotationY !== piece.rotationY || previous.rotationZ !== piece.rotationZ) {
+        applyPieceTransform3D(group, piece);
+        group.updateMatrixWorld(true);
+        const { height } = getPieceDimensions(piece);
+        group.userData.labelPosition.set(piece.x, (piece.y || 0) + height + 0.42, piece.z);
+        transformsChanged = true;
+      }
+      group.userData.piece = piece;
+      group.userData.isSelected = isSelected;
+    }
 
     const gaze = gazeIndicatorRef.current;
-    if (gaze) {
-      const selectedPiece = pieces.find((p) => p.id === selectedPieceId);
-      if (selectedPiece) {
-        gaze.visible = true;
-        gaze.position.set(selectedPiece.x, (selectedPiece.y || 0) + 0.02, selectedPiece.z);
-        gaze.rotation.y = selectedPiece.rotationY || 0;
-      } else {
-        gaze.visible = false;
-      }
+    const selectedPiece = currentMeshes.get(selectedPieceId)?.userData.piece;
+    gaze.visible = Boolean(selectedPiece);
+    if (selectedPiece) {
+      gaze.position.set(selectedPiece.x, (selectedPiece.y || 0) + 0.02, selectedPiece.z);
+      gaze.rotation.y = selectedPiece.rotationY || 0;
+      gaze.updateMatrixWorld(true);
     }
 
-    if (renderer && camera) {
+    if (transformsChanged) {
+      updatePinInstances(scene, pinInstancesRef.current, currentMeshes);
       renderer.shadowMap.needsUpdate = true;
-      renderer.render(scene, camera);
     }
-    updateLabelsPositionDOM();
-  }, [pieces, selectedPieceId, updateLabelsPositionDOM]);
+    wakeUpRenderRef.current();
+  }, [pieces, selectedPieceId]);
 
-  // Quando cambia showLabels, aggiorna immediatamente le posizioni DOM
   useEffect(() => {
-    updateLabelsPositionDOM();
-    if (rendererRef.current && sceneRef.current && cameraRef.current) {
-      rendererRef.current.render(sceneRef.current, cameraRef.current);
-    }
+    if (showLabels) updateLabelsPositionDOM();
   }, [showLabels, updateLabelsPositionDOM]);
 
-  // SINCRONIZZAZIONE FILI RELAZIONALI
   useEffect(() => {
     const scene = sceneRef.current;
     const renderer = rendererRef.current;
-    const camera = cameraRef.current;
-    if (!scene) return;
+    if (!scene || !renderer) return;
 
     const currentLinkMeshes = linkMeshesRef.current;
-    const activeLinkIds = new Set(links.map((l) => l.id));
+    const piecesById = pieceMeshesRef.current;
+    const activeLinkIds = new Set();
+    let changed = false;
+    for (const link of links) {
+      const source = piecesById.get(link.sourceId)?.userData.piece;
+      const target = piecesById.get(link.targetId)?.userData.piece;
+      if (!source || !target) continue;
+      activeLinkIds.add(link.id);
 
-    const disposeGroupResources = (grp) => {
-      grp.traverse((child) => {
-        if (child.geometry) child.geometry.dispose();
-        if (child.material) child.material.dispose();
-      });
-    };
-
-    for (const [id, mesh] of currentLinkMeshes.entries()) {
-      if (!activeLinkIds.has(id)) {
-        scene.remove(mesh);
-        disposeGroupResources(mesh);
-        currentLinkMeshes.delete(id);
+      const signature = `${source.x},${source.y || 0},${source.z}|${target.x},${target.y || 0},${target.z}|${link.type}`;
+      const existing = currentLinkMeshes.get(link.id);
+      if (existing?.userData.signature === signature) continue;
+      if (existing) {
+        scene.remove(existing);
+        disposeLink(existing);
       }
+      const group = buildLinkMeshGroup(link, source, target);
+      group.userData.signature = signature;
+      scene.add(group);
+      currentLinkMeshes.set(link.id, group);
+      changed = true;
     }
 
-    let anyLinkChanged = false;
-
-    links.forEach((link) => {
-      const sourcePiece = pieces.find((p) => p.id === link.sourceId);
-      const targetPiece = pieces.find((p) => p.id === link.targetId);
-      if (!sourcePiece || !targetPiece) return;
-
-      const signature = `${sourcePiece.x},${sourcePiece.y || 0},${sourcePiece.z}|${targetPiece.x},${targetPiece.y || 0},${targetPiece.z}|${link.type}`;
-      const existingGroup = currentLinkMeshes.get(link.id);
-
-      if (existingGroup && existingGroup.userData.signature === signature) {
-        if (existingGroup.parent !== scene) {
-          scene.add(existingGroup);
-          anyLinkChanged = true;
-        }
-        return;
+    for (const [id, group] of currentLinkMeshes) {
+      if (!activeLinkIds.has(id)) {
+        scene.remove(group);
+        disposeLink(group);
+        currentLinkMeshes.delete(id);
+        changed = true;
       }
-
-      if (existingGroup) {
-        scene.remove(existingGroup);
-        disposeGroupResources(existingGroup);
-      }
-
-      const newLinkGroup = buildLinkMeshGroup(link, sourcePiece, targetPiece);
-      newLinkGroup.userData = { linkId: link.id, signature };
-      scene.add(newLinkGroup);
-      currentLinkMeshes.set(link.id, newLinkGroup);
-      anyLinkChanged = true;
-    });
-
-    if (anyLinkChanged && renderer && camera) {
+    }
+    if (changed) {
       renderer.shadowMap.needsUpdate = true;
-      renderer.render(scene, camera);
+      wakeUpRenderRef.current();
     }
   }, [links, pieces]);
 
@@ -606,60 +700,90 @@ export default function GenoCanvas({
 
     const startPos = camera.position.clone();
     const startTarget = controls.target.clone();
-    const duration = 500;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      camera.position.copy(targetPos);
+      controls.target.copy(targetLookAt);
+      cameraAnimationRef.current = null;
+      wakeUpRenderRef.current();
+      return;
+    }
+
     const startTime = performance.now();
-    wakeUpRenderRef.current(duration + 350);
-
-    const updateAnim = (time) => {
-      const elapsed = time - startTime;
-      const progress = Math.min(elapsed / duration, 1);
-      const ease = 1 - Math.pow(1 - progress, 3);
-
+    cameraAnimationRef.current = (time) => {
+      const progress = Math.min((time - startTime) / 360, 1);
+      const ease = 1 - (1 - progress) ** 3;
       camera.position.lerpVectors(startPos, targetPos, ease);
       controls.target.lerpVectors(startTarget, targetLookAt, ease);
-      controls.update();
-
-      if (progress < 1) {
-        requestAnimationFrame(updateAnim);
-      }
+      if (progress < 1) wakeUpRenderRef.current();
+      else cameraAnimationRef.current = null;
     };
-    requestAnimationFrame(updateAnim);
+    wakeUpRenderRef.current();
   }, []);
 
-  // GESTIONE VISTE CAMERA
   useEffect(() => {
-    if (!cameraView || !cameraRef.current || !controlsRef.current) return;
+    const camera = cameraRef.current;
+    if (!cameraView || !camera || !controlsRef.current) return;
 
-    if (cameraView === 'fit') {
-      if (pieces.length === 0) {
-        animateCamera(new THREE.Vector3(0, 13.5, 15.5), new THREE.Vector3(0, 0.5, 0));
-      } else {
-        const box = new THREE.Box3();
-        pieces.forEach((p) => box.expandByPoint(new THREE.Vector3(p.x, p.y || 0, p.z)));
-        const center = box.getCenter(new THREE.Vector3());
-        const size = box.getSize(new THREE.Vector3());
-        const maxDim = Math.max(size.x, size.z, 6.5);
-        const targetPos = new THREE.Vector3(center.x, maxDim * 1.45, center.z + maxDim * 1.38);
-        animateCamera(targetPos, new THREE.Vector3(center.x, 0.6, center.z));
-      }
+    if (cameraView === 'zoom-in' || cameraView === 'zoom-out') {
+      const controls = controlsRef.current;
+      const target = controls.target.clone();
+      const offset = camera.position.clone().sub(target);
+      const factor = cameraView === 'zoom-in' ? 0.77 : 1.3;
+      offset.setLength(THREE.MathUtils.clamp(offset.length() * factor, controls.minDistance, controls.maxDistance));
+      animateCamera(offset.add(target), target);
+    } else if (cameraView === 'fit' && pieces.length > 0) {
+      const sphere = computePiecesBounds(pieces).getBoundingSphere(new THREE.Sphere());
+      const halfFov = THREE.MathUtils.degToRad(camera.fov / 2);
+      const narrowFov = Math.atan(Math.tan(halfFov) * Math.min(camera.aspect, 1));
+      const distance = Math.max(6, sphere.radius * 1.15 / Math.sin(narrowFov));
+      const offset = new THREE.Vector3(0, 0.68, 0.78).setLength(distance);
+      animateCamera(offset.add(sphere.center), sphere.center);
     } else {
-      const proj = CAMERA_PROJECTIONS.find((p) => p.id === cameraView);
-      if (proj && proj.position) {
-        animateCamera(
-          new THREE.Vector3(...proj.position),
-          new THREE.Vector3(...(proj.target || [0, 0.5, 0]))
-        );
+      const projection = cameraView === 'fit'
+        ? STUDIO_VIEW
+        : CAMERA_PROJECTIONS.find((view) => view.id === cameraView);
+      if (projection?.position) {
+        const target = new THREE.Vector3(...projection.target);
+        const offset = new THREE.Vector3(...projection.position).sub(target);
+        const aspect = Math.min(camera.aspect, 1);
+        if (projection.id === 'top') {
+          const halfFov = THREE.MathUtils.degToRad(camera.fov / 2);
+          offset.setLength((TRAY_RADIUS + 1.3) / (Math.tan(halfFov) * aspect));
+        } else {
+          offset.multiplyScalar(TRAY_VIEW_SCALE / aspect);
+        }
+        animateCamera(offset.add(target), target);
       }
     }
 
-    if (onCameraViewHandled) onCameraViewHandled();
+    onCameraViewHandled?.();
   }, [cameraView, pieces, animateCamera, onCameraViewHandled]);
+
+  const queuePiecePreview = useCallback((piece, canvas) => {
+    const request = { piece, canvas };
+    previewRequestRef.current = request;
+    wakeUpRenderRef.current();
+    return () => {
+      if (previewRequestRef.current === request) previewRequestRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    wakeUpRenderRef.current();
+  }, [isDark]);
+
+  useEffect(() => {
+    if (controlsRef.current && !interactionModeRef.current) {
+      controlsRef.current.enabled = !placementPieceId;
+    }
+  }, [placementPieceId]);
 
   // ESPORTAZIONE API + ASSI TELECAMERA PER MOVIMENTO TASTIERA (WASD / FRECCE)
   useEffect(() => {
     if (!onRegisterExportApi) return;
 
     const api = {
+      queuePiecePreview,
       // Restituisce i vettori unitari "avanti" e "destra" sul piano orizzontale XZ rispetto alla telecamera attuale
       getCameraHorizontalAxes: () => {
         const cam = cameraRef.current;
@@ -689,11 +813,11 @@ export default function GenoCanvas({
         includeLabels = true,
         includeHeader = true
       }) => {
+        wakeUpRenderRef.current();
         const canvas = renderProjectionToCanvas({
           renderer: rendererRef.current,
           scene: sceneRef.current,
           userCamera: cameraRef.current,
-          userControls: controlsRef.current,
           pieces: piecesRef.current,
           links,
           currentPhaseId,
@@ -704,16 +828,15 @@ export default function GenoCanvas({
           includeHeader,
           gazeIndicator: gazeIndicatorRef.current
         });
-        wakeUpRenderRef.current(200);
         return canvas ? canvas.toDataURL('image/png') : null;
       },
 
       renderCompositeSheetDataUrl: ({ includeLabels = true, resolutionScale = 1 } = {}) => {
+        wakeUpRenderRef.current();
         const canvas = renderMultiProjectionSheet({
           renderer: rendererRef.current,
           scene: sceneRef.current,
           userCamera: cameraRef.current,
-          userControls: controlsRef.current,
           pieces: piecesRef.current,
           links,
           currentPhaseId,
@@ -721,7 +844,6 @@ export default function GenoCanvas({
           gazeIndicator: gazeIndicatorRef.current,
           resolutionScale
         });
-        wakeUpRenderRef.current(200);
         return canvas ? canvas.toDataURL('image/png') : null;
       },
 
@@ -774,7 +896,7 @@ export default function GenoCanvas({
     };
 
     onRegisterExportApi(api);
-  }, [onRegisterExportApi, links, currentPhaseId]);
+  }, [onRegisterExportApi, links, currentPhaseId, queuePiecePreview]);
 
   // INTERAZIONE MOUSE SENZA LAYOUT THRASHING
   const updateMouseCoords = (e) => {
@@ -786,7 +908,9 @@ export default function GenoCanvas({
   };
 
   const handlePointerDown = (e) => {
-    if (e.button !== 0) return;
+    if (e.button !== 0 || !e.isPrimary || placementPieceId) return;
+    const { left, top } = mountRef.current.getBoundingClientRect();
+    Object.assign(boundsRef.current, { left, top });
     if (!updateMouseCoords(e) || !cameraRef.current) return;
 
     raycasterRef.current.setFromCamera(mouseRef.current, cameraRef.current);
@@ -797,46 +921,39 @@ export default function GenoCanvas({
         if (onDragStart) onDragStart();
         interactionModeRef.current = 'rotate';
         activePieceIdRef.current = selectedPieceIdRef.current;
+        dragPointerRef.current = e.pointerId;
         if (controlsRef.current) controlsRef.current.enabled = false;
         if (mountRef.current) mountRef.current.style.cursor = 'grabbing';
         return;
       }
     }
 
-    const interactiveMeshes = [];
-    pieceMeshesRef.current.forEach((group) => {
-      group.traverse((child) => {
-        if (child.isMesh && child.name === 'piece-body') {
-          interactiveMeshes.push(child);
-        }
-      });
-    });
+    const interactiveMeshes = Array.from(pieceMeshesRef.current.values(), (group) => group.children[0].children[0]);
 
     const intersects = raycasterRef.current.intersectObjects(interactiveMeshes, false);
 
     if (intersects.length > 0) {
-      const hitMesh = intersects[0].object;
-      const clickedPieceId =
-        hitMesh.userData?.pieceId ||
-        hitMesh.parent?.userData?.pieceId ||
-        hitMesh.parent?.parent?.userData?.pieceId;
+      const clickedPieceId = intersects[0].object.userData.pieceId;
 
       if (clickedPieceId) {
         if (e.shiftKey && selectedPieceIdRef.current && selectedPieceIdRef.current !== clickedPieceId) {
           const selPiece = piecesRef.current.find((p) => p.id === selectedPieceIdRef.current);
           const targetPiece = piecesRef.current.find((p) => p.id === clickedPieceId);
           if (selPiece && targetPiece) {
-            if (onDragStart) onDragStart();
             const angle = Math.atan2(targetPiece.x - selPiece.x, targetPiece.z - selPiece.z);
             onUpdatePiece(selPiece.id, { rotationY: Math.round(angle * 100) / 100 });
-            if (onDragEnd) onDragEnd();
             return;
           }
         }
 
         if (onDragStart) onDragStart();
         interactionModeRef.current = e.shiftKey ? 'rotate' : 'move';
+        const piece = pieceMeshesRef.current.get(clickedPieceId).userData.piece;
+        const hit = raycasterRef.current.ray.intersectPlane(groundPlaneRef.current, groundHitRef.current);
+        dragOffsetRef.current.x = hit ? piece.x - hit.x : 0;
+        dragOffsetRef.current.z = hit ? piece.z - hit.z : 0;
         activePieceIdRef.current = clickedPieceId;
+        dragPointerRef.current = e.pointerId;
         onSelectPiece(clickedPieceId);
 
         if (controlsRef.current) {
@@ -848,13 +965,14 @@ export default function GenoCanvas({
       }
     } else {
       if (e.shiftKey && selectedPieceIdRef.current) {
-        const groundHit = new THREE.Vector3();
+        const groundHit = groundHitRef.current;
         if (raycasterRef.current.ray.intersectPlane(groundPlaneRef.current, groundHit)) {
           const selPiece = piecesRef.current.find((p) => p.id === selectedPieceIdRef.current);
           if (selPiece) {
             if (onDragStart) onDragStart();
             interactionModeRef.current = 'rotate';
             activePieceIdRef.current = selPiece.id;
+            dragPointerRef.current = e.pointerId;
             if (controlsRef.current) controlsRef.current.enabled = false;
             const angle = Math.atan2(groundHit.x - selPiece.x, groundHit.z - selPiece.z);
             onUpdatePiece(selPiece.id, { rotationY: Math.round(angle * 100) / 100 });
@@ -866,30 +984,45 @@ export default function GenoCanvas({
     }
   };
 
-  const handlePointerMove = (e) => {
-    if (interactionModeRef.current && activePieceIdRef.current) {
-      if (!updateMouseCoords(e) || !cameraRef.current) return;
-      const pieceId = activePieceIdRef.current;
-      raycasterRef.current.setFromCamera(mouseRef.current, cameraRef.current);
-      const groundHit = new THREE.Vector3();
+  const applyPendingDrag = () => {
+    const point = pendingDragRef.current;
+    const pieceId = activePieceIdRef.current;
+    pendingDragRef.current = null;
+    if (!point || !pieceId || !updateMouseCoords(point) || !cameraRef.current) return;
 
-      if (raycasterRef.current.ray.intersectPlane(groundPlaneRef.current, groundHit)) {
-        if (interactionModeRef.current === 'rotate') {
-          const selPiece = piecesRef.current.find((p) => p.id === pieceId);
-          if (selPiece) {
-            const angle = Math.atan2(groundHit.x - selPiece.x, groundHit.z - selPiece.z);
-            onUpdatePiece(pieceId, { rotationY: Math.round(angle * 100) / 100 });
-          }
-        } else {
-          const newPos = calculateDragPosition(groundHit.x, groundHit.z, pieceId, piecesRef.current);
-          onUpdatePiece(pieceId, newPos);
-        }
+    const raycaster = raycasterRef.current;
+    raycaster.setFromCamera(mouseRef.current, cameraRef.current);
+    const hit = raycaster.ray.intersectPlane(groundPlaneRef.current, groundHitRef.current);
+    if (!hit) return;
+    const piece = pieceMeshesRef.current.get(pieceId)?.userData.piece;
+    if (!piece) return;
+    if (interactionModeRef.current === 'rotate') {
+      const angle = Math.round(Math.atan2(hit.x - piece.x, hit.z - piece.z) * 100) / 100;
+      if (angle !== (piece.rotationY || 0)) onUpdatePiece(pieceId, { rotationY: angle });
+    } else {
+      const offset = dragOffsetRef.current;
+      const position = calculateDragPosition(hit.x + offset.x, hit.z + offset.z, pieceId, piecesRef.current);
+      if (position.x !== piece.x || position.y !== (piece.y || 0) || position.z !== piece.z) {
+        onUpdatePiece(pieceId, position);
+      }
+    }
+  };
+
+  const handlePointerMove = (e) => {
+    if (interactionModeRef.current) {
+      if (e.pointerId !== dragPointerRef.current) return;
+      pendingDragRef.current = { clientX: e.clientX, clientY: e.clientY };
+      if (dragFrameRef.current === null) {
+        dragFrameRef.current = requestAnimationFrame(() => {
+          dragFrameRef.current = null;
+          applyPendingDrag();
+        });
       }
       return;
     }
 
     // Se stiamo ruotando la telecamera col mouse, non fare alcun raycasting
-    if (e.buttons !== 0 || isOrbitingRef.current) {
+    if (placementPieceId || e.buttons !== 0 || isOrbitingRef.current) {
       return;
     }
 
@@ -926,8 +1059,28 @@ export default function GenoCanvas({
     }
   };
 
-  const handlePointerUp = () => {
-    if (interactionModeRef.current) {
+  const handlePlacement = (event) => {
+    const camera = cameraRef.current;
+    if (!placementPieceId || !camera) return;
+    const rect = mountRef.current.getBoundingClientRect();
+    boundsRef.current = { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+    if (!updateMouseCoords(event)) return;
+    const raycaster = raycasterRef.current;
+    raycaster.setFromCamera(mouseRef.current, camera);
+    const hit = raycaster.ray.intersectPlane(groundPlaneRef.current, groundHitRef.current);
+    if (!hit || Math.hypot(hit.x, hit.z) > TRAY_RADIUS) return;
+    const position = calculateDragPosition(hit.x, hit.z, placementPieceId, piecesRef.current);
+    onPlacePiece(placementPieceId, position);
+  };
+
+  const handlePointerUp = (e) => {
+    if (interactionModeRef.current && e.pointerId === dragPointerRef.current) {
+      if (dragFrameRef.current !== null) {
+        cancelAnimationFrame(dragFrameRef.current);
+        dragFrameRef.current = null;
+        flushSync(applyPendingDrag);
+      }
+      dragPointerRef.current = null;
       interactionModeRef.current = null;
       activePieceIdRef.current = null;
       if (controlsRef.current) {
@@ -941,30 +1094,17 @@ export default function GenoCanvas({
   };
 
   return (
-    <div
-      ref={wrapperRef}
-      style={{
-        width: '100%',
-        height: '100%',
-        position: 'relative',
-        overflow: 'hidden'
-      }}
-    >
+    <div className="geno-scene" data-placing={Boolean(placementPieceId)}>
       {/* CONTENITORE WEBGL SEPARATO DALLE ETICHETTE */}
       <div
         ref={mountRef}
+        onClick={handlePlacement}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
-        onPointerLeave={handlePointerUp}
-        onWheel={() => wakeUpRenderRef.current(550)}
-        style={{
-          width: '100%',
-          height: '100%',
-          position: 'absolute',
-          inset: 0,
-          touchAction: 'none'
-        }}
+        onPointerCancel={handlePointerUp}
+        onLostPointerCapture={handlePointerUp}
+        className="geno-webgl"
       />
 
       {/* OVERLAY ETICHETTE 2D */}
@@ -973,12 +1113,15 @@ export default function GenoCanvas({
           const isSelected = piece.id === selectedPieceId;
 
           return (
-            <div
+            <button
               key={piece.id}
+              type="button"
+              className="geno-piece-label"
+              aria-pressed={isSelected}
+              title={piece.role ? `${piece.name || 'Senza nome'} · ${piece.role}` : undefined}
               ref={(el) => {
                 if (el) {
                   labelDomMapRef.current.set(piece.id, el);
-                  updateLabelsPositionDOM();
                 } else {
                   labelDomMapRef.current.delete(piece.id);
                 }
@@ -988,82 +1131,17 @@ export default function GenoCanvas({
                 if (e.shiftKey && selectedPieceId && selectedPieceId !== piece.id) {
                   const selPiece = pieces.find((p) => p.id === selectedPieceId);
                   if (selPiece) {
-                    if (onDragStart) onDragStart();
                     const angle = Math.atan2(piece.x - selPiece.x, piece.z - selPiece.z);
                     onUpdatePiece(selPiece.id, { rotationY: Math.round(angle * 100) / 100 });
-                    if (onDragEnd) onDragEnd();
                   }
                   return;
                 }
                 onSelectPiece(piece.id);
               }}
-              style={{
-                position: 'absolute',
-                left: 0,
-                top: 0,
-                opacity: 0,
-                willChange: 'transform',
-                pointerEvents: 'none',
-                cursor: 'pointer',
-                zIndex: isSelected ? 30 : 20
-              }}
             >
-              <div
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  background: isSelected
-                    ? 'var(--accent-pine)'
-                    : 'rgba(255, 255, 255, 0.96)',
-                  color: isSelected ? '#FFFFFF' : 'var(--text-main)',
-                  padding: '4px 11px',
-                  borderRadius: '14px',
-                  border: `1px solid ${
-                    isSelected ? 'var(--accent-pine)' : 'rgba(205, 195, 180, 0.85)'
-                  }`,
-                  boxShadow: isSelected
-                    ? '0 6px 16px rgba(46, 71, 59, 0.24)'
-                    : '0 2px 8px rgba(29, 36, 33, 0.08)',
-                  whiteSpace: 'nowrap',
-                  userSelect: 'none'
-                }}
-              >
-                <span
-                  style={{
-                    fontSize: '12px',
-                    fontWeight: isSelected ? 600 : 500,
-                    letterSpacing: '-0.01em'
-                  }}
-                >
-                  {piece.name || 'Senza nome'}
-                </span>
-                {piece.role && (
-                  <span
-                    style={{
-                      fontSize: '10px',
-                      opacity: isSelected ? 0.88 : 0.68,
-                      fontWeight: 400
-                    }}
-                  >
-                    {piece.role}
-                  </span>
-                )}
-              </div>
-
-              <div
-                style={{
-                  width: 0,
-                  height: 0,
-                  margin: '0 auto',
-                  borderLeft: '4px solid transparent',
-                  borderRight: '4px solid transparent',
-                  borderTop: `4px solid ${
-                    isSelected ? 'var(--accent-pine)' : 'rgba(205, 195, 180, 0.85)'
-                  }`
-                }}
-              />
-            </div>
+              <span className="geno-piece-name">{piece.name || 'Senza nome'}</span>
+              {isSelected && piece.role && <span className="geno-piece-role">{piece.role}</span>}
+            </button>
           );
         })}
     </div>

@@ -1,4 +1,4 @@
-import { PIECE_SIZES } from '../constants';
+import { PIECE_SIZES, TRAY_PLAYABLE_RADIUS } from '../constants';
 
 // Calcola dimensioni fisiche base e dimensioni effettive considerando eventuale inclinazione/ribaltamento (rotationX, rotationZ)
 export function getPieceDimensions(piece) {
@@ -121,11 +121,9 @@ export function getPieceDimensions(piece) {
 }
 
 // Trova se le coordinate (x, z) si trovano EFFETTIVAMENTE sopra la sommità di un altro pezzo
-export function getSupportingPieceAt(x, z, pieceId, pieces) {
+export function getSupportingPieceAt(x, z, pieceId, pieces, stackedOnSelf = findStackedPiecesRecursive(pieceId, pieces)) {
   let highestSupport = null;
   let maxTopY = -1;
-
-  const stackedOnSelf = findStackedPiecesRecursive(pieceId, pieces);
 
   for (const other of pieces) {
     if (other.id === pieceId || stackedOnSelf.has(other.id)) continue;
@@ -163,7 +161,7 @@ export function calculateDragPosition(rawMouseX, rawMouseZ, draggedPieceId, piec
   const stackedOnSelf = findStackedPiecesRecursive(draggedPieceId, pieces);
 
   // 1. Verifichiamo se la posizione è direttamente sulla sommità di un altro pezzo
-  const support = getSupportingPieceAt(rawMouseX, rawMouseZ, draggedPieceId, pieces);
+  const support = getSupportingPieceAt(rawMouseX, rawMouseZ, draggedPieceId, pieces, stackedOnSelf);
 
   if (support) {
     const targetY = support.topY;
@@ -218,9 +216,9 @@ export function calculateDragPosition(rawMouseX, rawMouseZ, draggedPieceId, piec
     }
   }
 
-  // 4. Limita all'interno del vassoio circolare (raggio utile 8.6)
+  // 4. Limita all'interno del vassoio circolare
   const distFromCenter = Math.sqrt(x * x + z * z);
-  const maxRadius = 8.6 - selfDims.collisionRadius;
+  const maxRadius = TRAY_PLAYABLE_RADIUS - selfDims.collisionRadius;
   if (distFromCenter > maxRadius && distFromCenter > 0) {
     const factor = maxRadius / distFromCenter;
     x *= factor;
@@ -237,7 +235,7 @@ export function calculateDragPosition(rawMouseX, rawMouseZ, draggedPieceId, piec
 // Trova una posizione libera sul vassoio partendo da (preferredX, preferredZ) con spirale aurea
 export function findFreePositionOnTray(pieces, shape = 'box', size = 'medium', preferredX = 0, preferredZ = 0, excludeId = null) {
   const dummyDims = getPieceDimensions({ shape, size });
-  const maxRadius = 8.4 - dummyDims.collisionRadius;
+  const maxRadius = TRAY_PLAYABLE_RADIUS - 0.2 - dummyDims.collisionRadius;
 
   const isFree = (cx, cz) => {
     const r = Math.sqrt(cx * cx + cz * cz);
@@ -263,17 +261,17 @@ export function findFreePositionOnTray(pieces, shape = 'box', size = 'medium', p
   }
 
   const goldenAngle = 2.399963229728653;
-  for (let i = 1; i <= 120; i++) {
-    const dist = 0.55 * Math.sqrt(i);
-    const angle = i * goldenAngle;
-    const cx = preferredX + Math.cos(angle) * dist;
-    const cz = preferredZ + Math.sin(angle) * dist;
-    if (isFree(cx, cz)) {
-      return {
-        x: Math.round(cx * 100) / 100,
-        y: 0,
-        z: Math.round(z * 100) / 100
-      };
+  // Cerca prima vicino alla posizione richiesta, poi su tutta la superficie utile.
+  for (const [originX, originZ, radius] of [[preferredX, preferredZ, 6], [0, 0, maxRadius]]) {
+    const sampleCount = Math.ceil((radius / 0.55) ** 2);
+    for (let i = 0; i <= sampleCount; i++) {
+      const dist = radius * Math.sqrt(i / sampleCount);
+      const angle = i * goldenAngle;
+      const x = originX + Math.cos(angle) * dist;
+      const z = originZ + Math.sin(angle) * dist;
+      if (isFree(x, z)) {
+        return { x: Math.round(x * 100) / 100, y: 0, z: Math.round(z * 100) / 100 };
+      }
     }
   }
 
@@ -357,7 +355,7 @@ export function stabilizeAllPieces(pieces) {
       }
 
       const distFromCenter = Math.sqrt(result[i].x * result[i].x + result[i].z * result[i].z);
-      const maxR = 8.6 - dimsA.collisionRadius;
+      const maxR = TRAY_PLAYABLE_RADIUS - dimsA.collisionRadius;
       if (distFromCenter > maxR && distFromCenter > 0) {
         const f = maxR / distFromCenter;
         result[i].x = Math.round(result[i].x * f * 100) / 100;

@@ -74,7 +74,7 @@ export default function RelationsModal({
       style={{
         position: 'fixed',
         inset: 0,
-        backgroundColor: 'rgba(25, 30, 27, 0.45)',
+        backgroundColor: 'var(--overlay)',
         backdropFilter: 'blur(6px)',
         zIndex: 1000,
         display: 'flex',
@@ -117,7 +117,7 @@ export default function RelationsModal({
         <form
           onSubmit={handleCreate}
           style={{
-            background: '#FAF8F4',
+            background: 'var(--surface-muted)',
             border: '1px solid var(--border-light)',
             borderRadius: '12px',
             padding: '16px',
@@ -181,7 +181,7 @@ export default function RelationsModal({
                     border: `1px solid ${
                       linkType === lt.id ? 'var(--accent-pine)' : 'var(--border-light)'
                     }`,
-                    background: linkType === lt.id ? 'var(--accent-pine-light)' : '#FFFFFF',
+                    background: linkType === lt.id ? 'var(--accent-pine-light)' : 'var(--bg-elevated)',
                     cursor: 'pointer',
                     fontSize: '12px'
                   }}
@@ -234,7 +234,7 @@ export default function RelationsModal({
                 textAlign: 'center',
                 color: 'var(--text-muted)',
                 fontSize: '13px',
-                background: '#FAF8F4',
+                background: 'var(--surface-muted)',
                 borderRadius: '8px',
                 border: '1px solid var(--border-light)'
               }}
@@ -253,7 +253,7 @@ export default function RelationsModal({
                       alignItems: 'center',
                       justifyContent: 'space-between',
                       padding: '8px 12px',
-                      background: '#FFFFFF',
+                      background: 'var(--bg-elevated)',
                       border: '1px solid var(--border-light)',
                       borderRadius: '8px'
                     }}

@@ -1,4 +1,15 @@
 :root {
+  color-scheme: light;
+  --surface: #fffefa;
+  --surface-muted: #faf8f4;
+  --surface-hover: #f2eee6;
+  --danger-text: #9e3333;
+  --danger-bg: #fff7f7;
+  --danger-hover: #ffefef;
+  --overlay: rgba(25, 30, 27, 0.48);
+  --scroll-thumb: #cfc9bc;
+  --scroll-hover: #b0a898;
+  --preview-bg: #eee9df;
   --font-main: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   
   /* Scandinavian Nordic Palette */
@@ -46,6 +57,38 @@
   --transition-smooth: 200ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --surface: #252e28;
+  --surface-muted: #2d3830;
+  --surface-hover: #35433a;
+  --danger-text: #f2aba6;
+  --danger-bg: #482a28;
+  --danger-hover: #573230;
+  --overlay: rgba(9, 13, 10, 0.66);
+  --scroll-thumb: #56665b;
+  --scroll-hover: #728477;
+  --preview-bg: #242d27;
+  --bg-primary: #1d2520;
+  --bg-secondary: #303c33;
+  --bg-elevated: #242d27;
+  --bg-card: #28322b;
+  --bg-card-hover: #35433a;
+  --border-light: #4c5b50;
+  --border-active: #accdb5;
+  --text-main: #f3f2ea;
+  --text-muted: #d1dad1;
+  --text-subtle: #b7c5b9;
+  --text-inverse: #17241b;
+  --accent-pine: #b9d9c0;
+  --accent-pine-hover: #d0e7d4;
+  --accent-pine-light: #354d3c;
+  --shadow-sm: 0 2px 8px rgba(8, 14, 10, 0.19);
+  --shadow-md: 0 6px 20px rgba(8, 14, 10, 0.23);
+  --shadow-lg: 0 12px 36px rgba(8, 14, 10, 0.3);
+  --shadow-floating: 0 16px 40px -10px rgba(8, 14, 10, 0.42);
+}
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -78,7 +121,7 @@ body {
 
 /* Pannelli Scandinavian */
 .scandi-panel {
-  background: rgba(255, 255, 255, 0.96);
+  background: var(--surface);
   border: 1px solid var(--border-light);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-md);
@@ -101,15 +144,15 @@ body {
   padding: 7px 13px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-light);
-  background: #FFFFFF;
+  background: var(--bg-elevated);
   color: var(--text-main);
   cursor: pointer;
   transition: background-color var(--transition-smooth), border-color var(--transition-smooth), transform var(--transition-smooth);
 }
 
 .btn-scandi:hover:not(:disabled) {
-  background: #FAF8F4;
-  border-color: #ABA292;
+  background: var(--surface-hover);
+  border-color: var(--border-active);
   transform: translateY(-1px);
 }
 
@@ -141,14 +184,14 @@ button:focus-visible {
 }
 
 .btn-scandi-danger {
-  color: #9E3333;
-  border-color: rgba(158, 51, 51, 0.28);
-  background: #FFF7F7;
+  color: var(--danger-text);
+  border-color: var(--border-light);
+  background: var(--danger-bg);
 }
 
 .btn-scandi-danger:hover:not(:disabled) {
-  background: #FFEFEF;
-  border-color: #9E3333;
+  background: var(--danger-hover);
+  border-color: var(--danger-text);
 }
 
 .btn-scandi-icon {
@@ -165,7 +208,7 @@ button:focus-visible {
   padding: 7px 11px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-light);
-  background: #FFFFFF;
+  background: var(--bg-elevated);
   color: var(--text-main);
   outline: none;
   transition: border-color var(--transition-smooth), box-shadow var(--transition-smooth);
@@ -180,7 +223,7 @@ button:focus-visible {
 
 .scandi-input:focus {
   border-color: var(--accent-pine);
-  box-shadow: 0 0 0 2px rgba(46, 71, 59, 0.16);
+  box-shadow: 0 0 0 2px var(--accent-pine-light);
 }
 
 /* Range sliders */
@@ -189,7 +232,7 @@ input[type="range"] {
   appearance: none;
   width: 100%;
   height: 5px;
-  background: #DFDAD0;
+  background: var(--border-light);
   border-radius: 3px;
   outline: none;
 }
@@ -245,10 +288,575 @@ input[type="range"]::-webkit-slider-thumb:hover {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #CFC9BC;
+  background: var(--scroll-thumb);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #B0A898;
+  background: var(--scroll-hover);
 }
+
+/* Editor */
+.geno-app {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  width: 100%;
+  background: var(--surface-muted);
+}
+
+.geno-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-light);
+  background: var(--surface);
+}
+
+.geno-header[data-zen='true'] .geno-actions > :not(:last-child) {
+  display: none;
+}
+
+.geno-identity,
+.geno-brand,
+.geno-phases,
+.geno-actions {
+  display: flex;
+  align-items: center;
+}
+
+.geno-identity { gap: 14px; min-width: 0; }
+.geno-brand { gap: 10px; flex-shrink: 0; }
+.geno-patient { min-width: 0; min-height: 34px; background: var(--surface-muted); }
+.geno-patient-name {
+  max-width: 145px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.geno-phases {
+  gap: 2px;
+  padding: 3px;
+  background: var(--bg-secondary);
+  border-radius: 10px;
+}
+
+.geno-actions { gap: 5px; }
+.geno-actions .btn-scandi { min-height: 34px; white-space: nowrap; }
+
+.geno-workspace {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.geno-workspace[data-inspector='true'] {
+  grid-template-columns: minmax(0, 1fr) 300px;
+}
+
+.geno-stage {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-primary);
+  isolation: isolate;
+}
+
+.geno-webgl { position: absolute; inset: 0; touch-action: none; }
+.geno-webgl canvas { display: block; width: 100%; height: 100%; }
+
+.geno-stage-tools {
+  position: absolute;
+  z-index: 40;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  pointer-events: none;
+}
+
+.geno-stage-tools > * { pointer-events: auto; }
+
+.geno-camera {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px;
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.geno-camera .btn-scandi {
+  min-height: 34px;
+  padding: 5px 9px;
+  border-color: transparent;
+  background: transparent;
+}
+
+.geno-view-select {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 7px;
+  color: var(--accent-pine);
+}
+
+.geno-view-select select {
+  min-height: 34px;
+  max-width: 72px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent-pine);
+  font: 600 13px var(--font-main);
+  cursor: pointer;
+}
+
+.geno-view-select select:focus-visible {
+  outline: 2px solid var(--accent-pine);
+  outline-offset: 1px;
+}
+
+.geno-camera [aria-pressed='true'] {
+  background: var(--accent-pine-light);
+  color: var(--accent-pine);
+}
+
+.geno-stage-status {
+  position: absolute;
+  z-index: 40;
+  inset: auto 14px 12px;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  pointer-events: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.geno-stage-status span {
+  padding: 5px 9px;
+  background: var(--surface);
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+}
+
+.geno-empty {
+  position: absolute;
+  inset: 50% 0 auto;
+  display: grid;
+  justify-items: center;
+  gap: 5px;
+  color: var(--accent-pine);
+  pointer-events: none;
+  text-align: center;
+}
+
+.geno-empty strong { font-size: 18px; }
+.geno-empty span { font-size: 13px; }
+
+.geno-inspector {
+  min-height: 0;
+  overflow: auto;
+  border-left: 1px solid var(--border-light);
+  background: var(--surface);
+}
+
+.geno-properties {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+}
+
+@media (max-width: 1190px) {
+  .geno-brand-caption { display: none !important; }
+  .geno-action-label { display: none; }
+}
+
+@media (max-width: 940px) {
+  .geno-identity { flex: 1 1 100%; }
+  .geno-brand-caption { display: block !important; }
+}
+
+@media (max-width: 780px) {
+  .geno-workspace[data-inspector='true'] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(0, 49%);
+  }
+
+  .geno-inspector {
+    border-left: 0;
+    border-top: 1px solid var(--border-light);
+  }
+}
+
+@media (max-width: 550px) {
+  .geno-header { gap: 6px; padding: 7px 9px; }
+  .geno-header[data-zen='true'] .geno-identity { flex: 0 1 auto; }
+  .geno-identity { justify-content: space-between; gap: 8px; }
+  .geno-brand { gap: 6px; }
+  .geno-brand-caption { display: none !important; }
+  .geno-patient { padding-inline: 7px !important; }
+  .geno-patient-name { max-width: 98px; }
+  .geno-phases { flex: 1 1 100%; }
+  .geno-phases button { flex: 1; }
+  .geno-actions { flex: 1; justify-content: space-between; gap: 3px; }
+  .geno-actions button { min-height: 36px; }
+  .geno-stage-hints { display: none; }
+  .geno-camera .btn-scandi, .geno-view-select select { min-height: 34px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --transition-smooth: 0ms; }
+}
+
+.geno-scene { position: absolute; inset: 0; overflow: hidden; }
+
+.geno-piece-label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 20;
+  visibility: hidden;
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  max-width: 176px;
+  border: 1px solid var(--border-light);
+  border-radius: 7px;
+  padding: 4px 8px;
+  background: var(--surface);
+  color: var(--text-main);
+  box-shadow: var(--shadow-sm);
+  font: 600 12px/1.2 var(--font-main);
+  cursor: pointer;
+}
+
+.geno-piece-label::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: calc(50% - 4px);
+  border: 4px solid transparent;
+  border-top-color: var(--border-light);
+  pointer-events: none;
+}
+
+.geno-piece-label:hover,
+.geno-piece-label:focus-visible { z-index: 31; }
+
+.geno-piece-label[aria-pressed='true'] {
+  z-index: 30;
+  background: var(--accent-pine);
+  border-color: var(--accent-pine);
+  color: var(--text-inverse);
+}
+
+.geno-piece-label[aria-pressed='true']::after { border-top-color: var(--accent-pine); }
+.geno-piece-name,
+.geno-piece-role { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.geno-piece-role { font-size: 10px; font-weight: 400; color: var(--text-inverse); }
+
+
+@media (max-width: 550px) {
+  .geno-piece-label { font-size: 11px; padding: 3px 5px; max-width: 112px; }
+}
+
+@media (max-width: 360px) {
+  .geno-export-label { display: none; }
+}
+
+.geno-theme-toggle { min-height: 36px; padding: 5px 9px; }
+.geno-app button { -webkit-tap-highlight-color: transparent; }
+
+.geno-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.geno-empty {
+  inset: 50% auto auto 50%;
+  transform: translate(-50%, -50%);
+  width: min(280px, calc(100% - 48px));
+  background: var(--surface);
+  border: 1px solid var(--border-light);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.geno-empty span { color: var(--text-muted); }
+.geno-empty button { margin-top: 7px; pointer-events: auto; }
+
+.geno-zoom {
+  position: absolute;
+  z-index: 40;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+}
+
+.geno-zoom .btn-scandi {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  background: transparent;
+  border-color: transparent;
+}
+
+.geno-piece-tools {
+  position: absolute;
+  z-index: 41;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  max-width: calc(100% - 16px);
+  pointer-events: none;
+}
+
+.geno-piece-tools .scandi-panel {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  pointer-events: auto;
+}
+
+.geno-piece-tools button { min-height: 38px; white-space: nowrap; }
+.geno-piece-tools p {
+  padding: 7px 10px;
+  background: var(--surface);
+  border: 1px solid var(--border-light);
+  border-radius: 7px;
+  font-size: 13px;
+  text-align: center;
+}
+
+.geno-scene[data-placing='true'] .geno-webgl canvas { cursor: crosshair; }
+.geno-scene[data-placing='true'] .geno-piece-label { pointer-events: none; }
+
+.geno-kit {
+  flex-shrink: 0;
+  overflow: auto;
+  padding: 8px 16px;
+  border-top: 1px solid var(--border-light);
+  background: var(--surface);
+  max-height: min(67dvh, 525px);
+}
+
+.geno-kit-toggle {
+  display: flex;
+  margin: 0 auto;
+  min-height: 39px;
+}
+
+.geno-kit-toggle[hidden] { display: none; }
+
+.geno-composer {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  grid-template-areas: 'heading heading' 'preview fields' 'preview add';
+  align-items: start;
+  gap: 10px 22px;
+  width: min(100%, 810px);
+  margin-inline: auto;
+  padding-block: 3px;
+}
+
+.geno-composer-heading,
+.geno-properties-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.geno-composer-heading { grid-area: heading; }
+.geno-composer-heading h2, .geno-properties-heading h2 { font-size: 17px; letter-spacing: -0.02em; }
+.geno-properties-heading h2 { overflow-wrap: anywhere; }
+.geno-properties-heading p { color: var(--text-muted); font-size: 12px; margin-top: 3px; }
+.geno-composer-heading button, .geno-properties-heading button { flex: 0 0 34px; }
+.geno-composer-heading h2:focus, .geno-properties-heading h2:focus { outline: none; }
+
+.geno-preview {
+  grid-area: preview;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  align-self: stretch;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--preview-bg);
+}
+
+.geno-preview canvas { display: block; width: 100%; height: auto; }
+.geno-preview figcaption {
+  align-self: start;
+  padding: 6px 8px 10px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.geno-composer-fields,
+.geno-appearance-fields,
+.geno-property-group,
+.geno-gaze-tools { display: grid; gap: 9px; }
+.geno-composer-fields { grid-area: fields; }
+
+.geno-composer-text,
+.geno-composer-appearance {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+}
+
+.geno-composer-appearance { grid-template-columns: max-content minmax(0, 1fr); }
+.geno-composer fieldset,
+.geno-properties fieldset { min-width: 0; border: 0; }
+
+.geno-composer label,
+.geno-field { display: grid; gap: 4px; min-width: 0; }
+
+.geno-composer label > span, .geno-field > span,
+.geno-composer legend, .geno-properties legend {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.geno-composer legend, .geno-properties legend { margin-bottom: 5px; }
+.geno-composer small, .geno-properties small { font-size: 11px; font-weight: 500; color: var(--text-muted); }
+.geno-composer .scandi-input, .geno-properties .scandi-input { min-height: 37px; }
+.geno-composer input, .geno-composer select, .geno-properties input, .geno-properties select, .geno-properties textarea { font-size: 14px; }
+
+.geno-shape-options,
+.geno-size-options,
+.geno-rotate-options,
+.geno-property-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.geno-shape-options button, .geno-size-options button { padding: 5px 8px; min-height: 36px; }
+.geno-shape-options svg { flex-shrink: 0; }
+.geno-rotate-options button, .geno-property-actions button { flex: 1; }
+
+.geno-color-options { display: flex; flex-wrap: wrap; gap: 5px; min-height: 36px; align-items: center; }
+.geno-color-options button {
+  width: 27px;
+  height: 27px;
+  border-radius: 50%;
+  background: var(--swatch);
+  border: 1px solid var(--border-active);
+  cursor: pointer;
+}
+.geno-color-options button[aria-pressed='true'] {
+  outline: 2px solid var(--accent-pine);
+  outline-offset: 1px;
+}
+.geno-color-options button[aria-pressed='true']:focus-visible { outline-offset: 3px; }
+
+.geno-piece-tools button[aria-pressed='true'],
+.geno-piece-tools button[aria-expanded='true'],
+.geno-appearance-fields .btn-scandi[aria-pressed='true'] {
+  background: var(--accent-pine-light);
+  color: var(--accent-pine);
+  border-color: var(--border-active);
+}
+
+.geno-add-to-tray { grid-area: add; justify-self: end; min-height: 40px; }
+.geno-properties { gap: 10px; }
+.geno-properties .geno-composer-appearance { grid-template-columns: 1fr; }
+.geno-place-button { justify-content: flex-start; }
+
+.geno-properties details {
+  border-top: 1px solid var(--border-light);
+  padding-top: 8px;
+}
+
+.geno-properties summary {
+  font-weight: 600;
+  font-size: 13px;
+  padding: 5px 0;
+  cursor: pointer;
+}
+
+.geno-properties details > div { margin-top: 7px; }
+.geno-properties textarea { resize: vertical; }
+.geno-piece-link {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  background: var(--surface-muted);
+  padding: 5px 7px;
+  border-radius: 6px;
+}
+
+@media (max-width: 780px) {
+  .geno-workspace:has(.geno-piece-tools) .geno-stage-hints { display: none; }
+  .geno-workspace:has(.geno-piece-tools) .geno-stage-status { inset: auto auto 69px 12px; }
+  .geno-composer { grid-template-columns: 155px minmax(0, 1fr); column-gap: 12px; }
+}
+
+@media (max-width: 560px) {
+  .geno-kit { padding-inline: 10px; }
+  .geno-composer {
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1fr);
+    grid-template-areas: 'heading heading' 'preview text' 'fields fields' 'add add';
+  }
+  .geno-composer-fields { display: contents; }
+  .geno-composer-text { grid-area: text; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .geno-composer .geno-appearance-fields { grid-area: fields; }
+  .geno-composer-appearance { grid-template-columns: minmax(0, 1fr); }
+  .geno-shape-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .geno-add-to-tray { width: 100%; }
+  .geno-piece-tools button { padding-inline: 8px; }
+  .geno-theme-toggle { min-height: 36px; }
+}
+
+@media (max-width: 425px) {
+  .geno-zoom { top: 63px; flex-direction: column; }
+  .geno-brand-credit { display: none; }
+  .geno-patient { margin-left: auto; }
+}
+
+@media (max-width: 370px) {
+  .geno-color-options { gap: 4px; }
+  .geno-color-options button { width: 24px; height: 24px; }
+}
+
+@media (pointer: coarse) {
+  .geno-composer input, .geno-composer select, .geno-properties .scandi-input { font-size: 16px; }
+}
+
+.geno-help-basics {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.geno-help-basics h3 { font-size: 15px; }
+.geno-help-basics ol { padding-left: 20px; color: var(--text-muted); }

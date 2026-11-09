@@ -1,4 +1,5 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useLayoutEffect, useRef } from 'react';
+import { Minus, Move, Plus, RotateCw, SlidersHorizontal } from 'lucide-react';
 import GenoCanvas from './components/GenoCanvas';
 import Header from './components/Header';
 import PieceDrawer from './components/PieceDrawer';
@@ -24,6 +25,16 @@ import { triggerDownload } from './utils/exportUtils';
 
 const LEGACY_STORAGE_KEY = 'geno3d-session-v2';
 const ARCHIVE_STORAGE_KEY = 'geno3d-patients-archive-v3';
+const THEME_STORAGE_KEY = 'geno3d-theme';
+
+function loadThemePreference() {
+  try {
+    const saved = localStorage.getItem(THEME_STORAGE_KEY);
+    return saved === 'light' || saved === 'dark' ? saved : null;
+  } catch {
+    return null;
+  }
+}
 
 function createDemoPhasesData() {
   return {
@@ -149,6 +160,7 @@ export default function App() {
   // Cronologia Undo / Redo per il genogramma attivo
   const [pastHistory, setPastHistory] = useState([]);
   const [futureHistory, setFutureHistory] = useState([]);
+  const [dragActive, setDragActive] = useState(false);
   const isDraggingRef = useRef(false);
   const preDragSnapshotRef = useRef(null);
   const phasesDataRef = useRef(phasesData);
@@ -158,6 +170,14 @@ export default function App() {
   const [selectedPieceId, setSelectedPieceId] = useState(null);
   const [cameraView, setCameraView] = useState(null);
   const [showLabels, setShowLabels] = useState(true);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [placementPieceId, setPlacementPieceId] = useState(null);
+  const [announcement, setAnnouncement] = useState('');
+  const [themePreference, setThemePreference] = useState(loadThemePreference);
+  const [systemDark, setSystemDark] = useState(() => matchMedia('(prefers-color-scheme: dark)').matches);
+  const isDark = themePreference ? themePreference === 'dark' : systemDark;
+  const inspectorButtonRef = useRef(null);
   const [isZenMode, setIsZenMode] = useState(false);
   const [isRelationsModalOpen, setIsRelationsModalOpen] = useState(false);
   const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
@@ -165,18 +185,75 @@ export default function App() {
   const [isPatientsModalOpen, setIsPatientsModalOpen] = useState(false);
   const [exportApi, setExportApi] = useState(null);
 
+  useLayoutEffect(() => {
+    document.documentElement.dataset.theme = isDark ? 'dark' : 'light';
+  }, [isDark]);
+
+  useEffect(() => {
+    const query = matchMedia('(prefers-color-scheme: dark)');
+    const handleChange = (event) => setSystemDark(event.matches);
+    query.addEventListener('change', handleChange);
+    return () => query.removeEventListener('change', handleChange);
+  }, []);
+
+  const toggleTheme = () => {
+    const next = isDark ? 'light' : 'dark';
+    setThemePreference(next);
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, next);
+    } catch {
+      // La scelta resta attiva per questa pagina.
+    }
+  };
+
+  const handleCanvasSelect = useCallback((id) => {
+    setSelectedPieceId(id);
+    setPlacementPieceId(null);
+    if (!id) setInspectorOpen(false);
+  }, []);
+
+  useEffect(() => {
+    if (!selectedPieceId) {
+      setInspectorOpen(false);
+      setPlacementPieceId(null);
+    }
+  }, [selectedPieceId]);
+
+  const changeComposer = (open) => {
+    setComposerOpen(open);
+    if (open) {
+      setInspectorOpen(false);
+      setPlacementPieceId(null);
+    }
+  };
+
   const currentPhaseData = phasesData[currentPhaseId] || { pieces: [], links: [] };
   const currentPieces = currentPhaseData.pieces;
   const currentLinks = currentPhaseData.links;
 
-  // Salvataggio automatico dell'archivio multi-paziente su localStorage (100% locale)
-  useEffect(() => {
+  // Salva al rilascio del pezzo e quando la pagina viene chiusa durante un gesto.
+  const archiveRef = useRef(archive);
+  archiveRef.current = archive;
+  const lastSavedArchive = useRef(null);
+  const saveArchive = useCallback(() => {
+    const current = archiveRef.current;
+    if (lastSavedArchive.current === current) return;
     try {
-      localStorage.setItem(ARCHIVE_STORAGE_KEY, JSON.stringify(archive));
+      localStorage.setItem(ARCHIVE_STORAGE_KEY, JSON.stringify(current));
+      lastSavedArchive.current = current;
     } catch {
-      // Ignora errori di quota storage
+      // Lo spazio di archiviazione locale può essere esaurito.
     }
-  }, [archive]);
+  }, []);
+
+  useEffect(() => {
+    if (!dragActive) saveArchive();
+  }, [archive, dragActive, saveArchive]);
+
+  useEffect(() => {
+    window.addEventListener('pagehide', saveArchive);
+    return () => window.removeEventListener('pagehide', saveArchive);
+  }, [saveArchive]);
 
   // Helper per aggiornare phasesData del paziente attivo
   const setPhasesData = useCallback((updaterOrValue) => {
@@ -188,67 +265,58 @@ export default function App() {
           typeof updaterOrValue === 'function'
             ? updaterOrValue(rec.phasesData)
             : updaterOrValue;
+        if (nextPhasesData === rec.phasesData) return rec;
         return {
           ...rec,
           updatedAt: new Date().toISOString(),
           phasesData: nextPhasesData
         };
       });
-      return {
-        ...prevArchive,
-        records: updatedRecords
-      };
+      if (updatedRecords.every((record, index) => record === prevArchive.records[index])) return prevArchive;
+      return { ...prevArchive, records: updatedRecords };
     });
   }, []);
 
   // Registra uno stato nella cronologia Undo
   const pushHistorySnapshot = useCallback((snapshot) => {
-    setPastHistory((prev) => [...prev.slice(-29), JSON.parse(JSON.stringify(snapshot))]);
+    setPastHistory((prev) => [...prev.slice(-29), snapshot]);
     setFutureHistory([]);
   }, []);
 
   const handleUndo = useCallback(() => {
-    setPastHistory((prevPast) => {
-      if (prevPast.length === 0) return prevPast;
-      const previousState = prevPast[prevPast.length - 1];
-      setFutureHistory((prevFuture) => [
-        JSON.parse(JSON.stringify(phasesDataRef.current)),
-        ...prevFuture.slice(0, 29)
-      ]);
-      setPhasesData(previousState);
-      return prevPast.slice(0, -1);
-    });
-  }, [setPhasesData]);
+    if (pastHistory.length === 0 || isDraggingRef.current) return;
+    const current = phasesDataRef.current;
+    setFutureHistory((history) => [current, ...history.slice(0, 29)]);
+    setPhasesData(pastHistory.at(-1));
+    setPastHistory((history) => history.slice(0, -1));
+  }, [pastHistory, setPhasesData]);
 
   const handleRedo = useCallback(() => {
-    setFutureHistory((prevFuture) => {
-      if (prevFuture.length === 0) return prevFuture;
-      const nextState = prevFuture[0];
-      setPastHistory((prevPast) => [
-        ...prevPast.slice(-29),
-        JSON.parse(JSON.stringify(phasesDataRef.current))
-      ]);
-      setPhasesData(nextState);
-      return prevFuture.slice(1);
-    });
-  }, [setPhasesData]);
+    if (futureHistory.length === 0 || isDraggingRef.current) return;
+    const current = phasesDataRef.current;
+    setPastHistory((history) => [...history.slice(-29), current]);
+    setPhasesData(futureHistory[0]);
+    setFutureHistory((history) => history.slice(1));
+  }, [futureHistory, setPhasesData]);
 
   const handleDragStart = useCallback(() => {
     isDraggingRef.current = true;
-    preDragSnapshotRef.current = JSON.parse(JSON.stringify(phasesDataRef.current));
+    preDragSnapshotRef.current = phasesDataRef.current;
+    setDragActive(true);
   }, []);
 
   const handleDragEnd = useCallback(() => {
-    if (isDraggingRef.current && preDragSnapshotRef.current) {
-      const before = JSON.stringify(preDragSnapshotRef.current);
-      const after = JSON.stringify(phasesDataRef.current);
-      if (before !== after) {
-        pushHistorySnapshot(preDragSnapshotRef.current);
-      }
-    }
     isDraggingRef.current = false;
+    setDragActive(false);
+  }, []);
+
+  useEffect(() => {
+    if (dragActive || !preDragSnapshotRef.current) return;
+    if (preDragSnapshotRef.current !== phasesDataRef.current) {
+      pushHistorySnapshot(preDragSnapshotRef.current);
+    }
     preDragSnapshotRef.current = null;
-  }, [pushHistorySnapshot]);
+  }, [dragActive, pushHistorySnapshot]);
 
   const handleSelectPhase = (phaseId) => {
     if (
@@ -360,6 +428,7 @@ export default function App() {
         };
       });
       setSelectedPieceId(id);
+      setAnnouncement(`${newPiece.name} aggiunto al piano. Puoi trascinarlo oppure scegliere Sposta.`);
     },
     [currentPhaseId, pushHistorySnapshot, setPhasesData]
   );
@@ -741,20 +810,24 @@ export default function App() {
         }
       }
 
-      if (isInputFocused) return;
-
-      const keyLower = e.key.toLowerCase();
-
       if (e.key === 'Escape') {
         if (isPatientsModalOpen) setIsPatientsModalOpen(false);
         else if (isExportModalOpen) setIsExportModalOpen(false);
         else if (isRelationsModalOpen) setIsRelationsModalOpen(false);
         else if (isHelpModalOpen) setIsHelpModalOpen(false);
+        else if (composerOpen) setComposerOpen(false);
+        else if (placementPieceId) setPlacementPieceId(null);
+        else if (inspectorOpen) {
+          setInspectorOpen(false);
+          inspectorButtonRef.current?.focus();
+        }
         else if (selectedPieceId) setSelectedPieceId(null);
         else if (isZenMode) setIsZenMode(false);
         return;
       }
 
+      if (isInputFocused || composerOpen || isPatientsModalOpen || isExportModalOpen || isRelationsModalOpen || isHelpModalOpen) return;
+      const keyLower = e.key.toLowerCase();
       if (keyLower === 'l' && !e.metaKey && !e.ctrlKey) {
         setShowLabels((prev) => !prev);
         return;
@@ -896,6 +969,9 @@ export default function App() {
     isRelationsModalOpen,
     isHelpModalOpen,
     isZenMode,
+    inspectorOpen,
+    composerOpen,
+    placementPieceId,
     handleUndo,
     handleRedo,
     handleDeletePiece,
@@ -904,24 +980,33 @@ export default function App() {
   ]);
 
   const selectedPiece = currentPieces.find((p) => p.id === selectedPieceId);
+  const showPieceTools = !isZenMode && !composerOpen && Boolean(selectedPiece);
+  const showInspector = showPieceTools && inspectorOpen;
+  const isPlacing = showPieceTools && placementPieceId === selectedPieceId;
+
+  const startPlacement = () => {
+    setInspectorOpen(false);
+    setPlacementPieceId(isPlacing ? null : selectedPieceId);
+  };
+
+  const placePiece = (id, position) => {
+    handleUpdatePiece(id, position);
+    setPlacementPieceId(null);
+    setAnnouncement(`${selectedPiece?.name || 'Pezzo'} spostato.`);
+  };
+
+  const rotateSelected = (delta) => {
+    const angle = ((selectedPiece.rotationY || 0) + delta) % (Math.PI * 2);
+    handleUpdatePiece(selectedPiece.id, { rotationY: Math.round(angle * 100) / 100 });
+  };
+
+  const closeInspector = () => {
+    setInspectorOpen(false);
+    inspectorButtonRef.current?.focus();
+  };
 
   return (
-    <main style={{ width: '100vw', height: '100vh', position: 'relative', overflow: 'hidden' }}>
-      <GenoCanvas
-        pieces={currentPieces}
-        onUpdatePiece={handleUpdatePiece}
-        onDragStart={handleDragStart}
-        onDragEnd={handleDragEnd}
-        selectedPieceId={selectedPieceId}
-        onSelectPiece={setSelectedPieceId}
-        links={currentLinks}
-        currentPhaseId={currentPhaseId}
-        showLabels={showLabels}
-        cameraView={cameraView}
-        onCameraViewHandled={() => setCameraView(null)}
-        onRegisterExportApi={setExportApi}
-      />
-
+    <main className="geno-app">
       <Header
         currentPhaseId={currentPhaseId}
         onSelectPhase={handleSelectPhase}
@@ -935,36 +1020,125 @@ export default function App() {
         onClearTray={() => handleClearCurrentPhaseTray(true)}
         onOpenHelpModal={() => setIsHelpModalOpen(true)}
         isZenMode={isZenMode}
-        onToggleZenMode={() => setIsZenMode(!isZenMode)}
+        onToggleZenMode={() => {
+          setPlacementPieceId(null);
+          setIsZenMode(!isZenMode);
+        }}
+        isDark={isDark}
+        onToggleTheme={toggleTheme}
         canUndo={pastHistory.length > 0}
         canRedo={futureHistory.length > 0}
         onUndo={handleUndo}
         onRedo={handleRedo}
       />
 
+      <div className="geno-workspace" data-inspector={Boolean(showInspector)}>
+        <section className="geno-stage" aria-label="Piano di lavoro 3D">
+          <GenoCanvas
+            pieces={currentPieces}
+            onUpdatePiece={handleUpdatePiece}
+            onDragStart={handleDragStart}
+            onDragEnd={handleDragEnd}
+            selectedPieceId={selectedPieceId}
+            onSelectPiece={handleCanvasSelect}
+            links={currentLinks}
+            currentPhaseId={currentPhaseId}
+            showLabels={showLabels}
+            cameraView={cameraView}
+            onCameraViewHandled={() => setCameraView(null)}
+            onRegisterExportApi={setExportApi}
+            isDark={isDark}
+            placementPieceId={isPlacing ? selectedPieceId : null}
+            onPlacePiece={placePiece}
+          />
+
+          {!isZenMode && (
+            <>
+              <div className="geno-stage-tools">
+                <CameraControlsBar
+                  onSelectView={setCameraView}
+                  showLabels={showLabels}
+                  onToggleLabels={() => setShowLabels(!showLabels)}
+                />
+              </div>
+              <div className="geno-zoom scandi-panel" role="group" aria-label="Zoom">
+                <button type="button" className="btn-scandi" aria-label="Avvicina" title="Avvicina" onClick={() => setCameraView('zoom-in')}>
+                  <Plus size={17} aria-hidden="true" />
+                </button>
+                <button type="button" className="btn-scandi" aria-label="Allontana" title="Allontana" onClick={() => setCameraView('zoom-out')}>
+                  <Minus size={17} aria-hidden="true" />
+                </button>
+              </div>
+              {showPieceTools && (
+                <div className="geno-piece-tools">
+                  {isPlacing && <p role="status">Tocca o fai clic sul piano per spostare il pezzo.</p>}
+                  <div className="scandi-panel" role="group" aria-label="Comandi del pezzo selezionato">
+                    <button type="button" className="btn-scandi" onClick={startPlacement} aria-pressed={isPlacing}>
+                      <Move size={16} aria-hidden="true" /> {isPlacing ? 'Annulla spostamento' : 'Sposta'}
+                    </button>
+                    <button type="button" className="btn-scandi" onClick={() => rotateSelected(Math.PI / 4)} title="Gira il pezzo di 45 gradi">
+                      <RotateCw size={16} aria-hidden="true" /> Gira
+                    </button>
+                    <button
+                      ref={inspectorButtonRef}
+                      type="button"
+                      className="btn-scandi"
+                      aria-expanded={showInspector}
+                      aria-controls={showInspector ? 'geno-inspector' : undefined}
+                      onClick={() => {
+                        setPlacementPieceId(null);
+                        setInspectorOpen(!inspectorOpen);
+                      }}
+                    >
+                      <SlidersHorizontal size={16} aria-hidden="true" /> Modifica
+                    </button>
+                  </div>
+                </div>
+              )}
+              {currentPieces.length === 0 && (
+                <div className="geno-empty">
+                  <strong>Il piano è vuoto</strong>
+                  <span>Scegli un pezzo per rappresentare una persona o un elemento importante.</span>
+                  <button type="button" className="btn-scandi" onClick={() => changeComposer(true)}>Scegli il primo pezzo</button>
+                </div>
+              )}
+              <span className="geno-sr-only" role="status">{announcement}</span>
+              <div className="geno-stage-status">
+                <span>{currentPieces.length} {currentPieces.length === 1 ? 'membro' : 'membri'}</span>
+                <span className="geno-stage-hints">{selectedPiece ? 'Trascina il pezzo per spostarlo' : 'Trascina lo sfondo per cambiare punto di vista'}</span>
+              </div>
+            </>
+          )}
+        </section>
+
+        {showInspector && (
+          <div className="geno-inspector" id="geno-inspector">
+            <SelectedPiecePanel
+              piece={selectedPiece}
+              pieces={currentPieces}
+              links={currentLinks}
+              onUpdatePiece={handleUpdatePiece}
+              onDeselect={closeInspector}
+              onStartPlacement={startPlacement}
+              onRotate={rotateSelected}
+              onOpenConnectModal={() => setIsRelationsModalOpen(true)}
+              onDeleteLink={handleDeleteLink}
+              onDuplicate={handleDuplicatePiece}
+              onDelete={handleDeletePiece}
+            />
+          </div>
+        )}
+      </div>
+
       {!isZenMode && (
-        <CameraControlsBar
-          onSelectView={(view) => setCameraView(view)}
-          showLabels={showLabels}
-          onToggleLabels={() => setShowLabels(!showLabels)}
+        <PieceDrawer
+          onAddPiece={handleAddPiece}
+          isOpen={composerOpen}
+          onOpenChange={changeComposer}
+          queuePreview={exportApi?.queuePiecePreview}
+          isDark={isDark}
         />
       )}
-
-      {!isZenMode && selectedPiece && (
-        <SelectedPiecePanel
-          piece={selectedPiece}
-          pieces={currentPieces}
-          links={currentLinks}
-          onUpdatePiece={handleUpdatePiece}
-          onDeselect={() => setSelectedPieceId(null)}
-          onOpenConnectModal={() => setIsRelationsModalOpen(true)}
-          onDeleteLink={handleDeleteLink}
-          onDuplicate={handleDuplicatePiece}
-          onDelete={handleDeletePiece}
-        />
-      )}
-
-      {!isZenMode && <PieceDrawer onAddPiece={handleAddPiece} />}
 
       <PatientsModal
         isOpen={isPatientsModalOpen}

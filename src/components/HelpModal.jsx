@@ -9,7 +9,7 @@ export default function HelpModal({ isOpen, onClose }) {
       style={{
         position: 'fixed',
         inset: 0,
-        backgroundColor: 'rgba(25, 30, 27, 0.45)',
+        backgroundColor: 'var(--overlay)',
         backdropFilter: 'blur(6px)',
         zIndex: 1000,
         display: 'flex',
@@ -64,11 +64,21 @@ export default function HelpModal({ isOpen, onClose }) {
           </button>
         </div>
 
+        <div className="geno-help-basics">
+          <h3>I primi gesti</h3>
+          <ol>
+            <li>Apri <strong>Aggiungi pezzo</strong> e guarda come cambia l’anteprima mentre scegli forma, altezza e colore.</li>
+            <li>Quando ti rappresenta ciò che hai in mente, premi <strong>Aggiungi al piano</strong>.</li>
+            <li>Trascina il pezzo, oppure scegli <strong>Sposta</strong> e indica dove metterlo sul piano.</li>
+            <li>Usa <strong>Gira</strong> per orientarlo o <strong>Modifica</strong> per cambiare sguardo, postura e aspetto.</li>
+          </ol>
+        </div>
+
         {/* Citazione teorica */}
         <div
           style={{
             background: 'var(--accent-pine-light)',
-            border: '1px solid rgba(46, 71, 59, 0.22)',
+            border: '1px solid var(--border-light)',
             padding: '14px 16px',
             borderRadius: '10px',
             fontSize: '13px',
@@ -87,7 +97,7 @@ export default function HelpModal({ isOpen, onClose }) {
 
           <div
             style={{
-              background: '#FAF8F4',
+              background: 'var(--surface-muted)',
               borderRadius: '10px',
               border: '1px solid var(--border-light)',
               overflow: 'hidden'
@@ -133,7 +143,7 @@ export default function HelpModal({ isOpen, onClose }) {
         {/* Scorciatoie e Interazioni Rapide */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
           <h3 style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-main)', margin: 0 }}>
-            Manipolazione Diretta &amp; Scorciatoie da Tastiera
+            Scorciatoie da tastiera
           </h3>
           <ul
             style={{
@@ -159,7 +169,7 @@ export default function HelpModal({ isOpen, onClose }) {
               <strong>Altre Scorciatoie:</strong> <code>Ctrl/Cmd + Z</code> Annulla • <code>Ctrl/Cmd + Y</code> Ripristina • <code>Canc / Backspace</code> Elimina • <code>Ctrl/Cmd + D</code> Duplica • <code>L</code> Mostra/Nascondi nomi • <code>Esc</code> Deseleziona.
             </li>
             <li>
-              <strong>Esportazione 2D e 3D:</strong> Dal pulsante <em>Esporta 2D / 3D</em> puoi scaricare la <strong>Tavola Sinottica Multi-Proiezione</strong>, le singole proiezioni ortogonali (Pianta, Fronte, Lato, Isometrica, Vista Camera) oppure la <strong>Scena 3D</strong> nei formati <code>.glb</code>, <code>.gltf</code>, <code>.obj</code> e <code>.stl</code>.
+              <strong>Esportazione 2D e 3D:</strong> Dal pulsante <em>Esporta</em> puoi scaricare la <strong>Tavola Sinottica Multi-Proiezione</strong>, le singole proiezioni ortogonali (Pianta, Fronte, Lato, Isometrica, Vista Camera) oppure la <strong>Scena 3D</strong> nei formati <code>.glb</code>, <code>.gltf</code>, <code>.obj</code> e <code>.stl</code>.
             </li>
           </ul>
         </div>

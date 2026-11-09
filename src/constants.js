@@ -1,6 +1,10 @@
 // Kit Geno 3D (Bassoli & Mariotti - Terapia Sistemica Relazionale)
 // Estetica Scandinava: materiali organici, legno naturale tornito e levigato, tonalità terrose e nordiche
 
+export const TRAY_RADIUS = 14;
+export const TRAY_PLAYABLE_RADIUS = TRAY_RADIUS - 0.9;
+export const TRAY_VIEW_SCALE = TRAY_RADIUS / 9.5;
+
 export const PIECE_SHAPES = [
   { id: 'box', name: 'Parallelepipedo', shortName: 'Blocco', desc: 'Figura maschile / struttura / confini definiti', icon: 'box' },
   { id: 'cylinder', name: 'Cilindro', shortName: 'Cilindro', desc: 'Figura femminile / accoglienza / continuità', icon: 'cylinder' },
@@ -58,8 +62,7 @@ export const CAMERA_PROJECTIONS = [
     desc: 'Proiezione ortogonale dall\'alto per lettura mappa genogramma e sguardi',
     position: [0, 24, 0.001],
     target: [0, 0, 0],
-    isOrtho: true,
-    orthoSize: 11.5
+    isOrtho: true
   },
   {
     id: 'front',
@@ -68,8 +71,7 @@ export const CAMERA_PROJECTIONS = [
     desc: 'Alzata frontale ad altezza occhi per leggere gerarchie ed elevazioni Y',
     position: [0, 3.2, 20],
     target: [0, 1.4, 0],
-    isOrtho: true,
-    orthoSize: 8.5
+    isOrtho: true
   },
   {
     id: 'right',
@@ -78,8 +80,7 @@ export const CAMERA_PROJECTIONS = [
     desc: 'Alzata laterale destra per valutare profondità avanti/dietro',
     position: [20, 3.2, 0],
     target: [0, 1.4, 0],
-    isOrtho: true,
-    orthoSize: 8.5
+    isOrtho: true
   },
   {
     id: 'left',
@@ -88,8 +89,7 @@ export const CAMERA_PROJECTIONS = [
     desc: 'Alzata laterale sinistra per valutare profondità e schieramenti',
     position: [-20, 3.2, 0],
     target: [0, 1.4, 0],
-    isOrtho: true,
-    orthoSize: 8.5
+    isOrtho: true
   },
   {
     id: 'back',
@@ -98,8 +98,7 @@ export const CAMERA_PROJECTIONS = [
     desc: 'Vista dal retro del tavolo verso il fronte',
     position: [0, 3.2, -20],
     target: [0, 1.4, 0],
-    isOrtho: true,
-    orthoSize: 8.5
+    isOrtho: true
   },
   {
     id: 'isometric',
@@ -108,8 +107,7 @@ export const CAMERA_PROJECTIONS = [
     desc: 'Proiezione assonometrica bilanciata a 45° senza distorsione prospettica',
     position: [13.5, 13.5, 13.5],
     target: [0, 0.8, 0],
-    isOrtho: true,
-    orthoSize: 10.5
+    isOrtho: true
   },
   {
     id: 'perspective',

@@ -150,7 +150,7 @@ export default function ExportModal({
       style={{
         position: 'fixed',
         inset: 0,
-        backgroundColor: 'rgba(25, 30, 27, 0.48)',
+        backgroundColor: 'var(--overlay)',
         backdropFilter: 'blur(6px)',
         zIndex: 1100,
         display: 'flex',
@@ -194,7 +194,7 @@ export default function ExportModal({
           style={{
             display: 'flex',
             gap: '8px',
-            background: '#EFECE4',
+            background: 'var(--bg-secondary)',
             padding: '5px',
             borderRadius: '12px'
           }}
@@ -205,7 +205,7 @@ export default function ExportModal({
             style={{
               flex: 1,
               background: activeTab === 'images' ? 'var(--accent-pine)' : 'transparent',
-              color: activeTab === 'images' ? '#FFFFFF' : 'var(--text-main)',
+              color: activeTab === 'images' ? 'var(--text-inverse)' : 'var(--text-main)',
               borderColor: 'transparent',
               fontWeight: 600
             }}
@@ -218,7 +218,7 @@ export default function ExportModal({
             style={{
               flex: 1,
               background: activeTab === 'scene3d' ? 'var(--accent-pine)' : 'transparent',
-              color: activeTab === 'scene3d' ? '#FFFFFF' : 'var(--text-main)',
+              color: activeTab === 'scene3d' ? 'var(--text-inverse)' : 'var(--text-main)',
               borderColor: 'transparent',
               fontWeight: 600
             }}
@@ -231,7 +231,7 @@ export default function ExportModal({
             style={{
               flex: 1,
               background: activeTab === 'session' ? 'var(--accent-pine)' : 'transparent',
-              color: activeTab === 'session' ? '#FFFFFF' : 'var(--text-main)',
+              color: activeTab === 'session' ? 'var(--text-inverse)' : 'var(--text-main)',
               borderColor: 'transparent',
               fontWeight: 600
             }}
@@ -261,7 +261,7 @@ export default function ExportModal({
                     border: `1.5px solid ${
                       selectedViewMode === 'composite' ? 'var(--accent-pine)' : 'var(--border-light)'
                     }`,
-                    background: selectedViewMode === 'composite' ? 'var(--accent-pine-light)' : '#FFFFFF',
+                    background: selectedViewMode === 'composite' ? 'var(--accent-pine-light)' : 'var(--bg-elevated)',
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
@@ -294,7 +294,7 @@ export default function ExportModal({
                           padding: '8px 10px',
                           borderRadius: '8px',
                           border: `1px solid ${isSel ? 'var(--accent-pine)' : 'var(--border-light)'}`,
-                          background: isSel ? 'var(--accent-pine-light)' : '#FFFFFF',
+                          background: isSel ? 'var(--accent-pine-light)' : 'var(--bg-elevated)',
                           cursor: 'pointer',
                           display: 'flex',
                           flexDirection: 'column',
@@ -323,7 +323,7 @@ export default function ExportModal({
               {/* Opzioni sovrimpressione grafica */}
               <div
                 style={{
-                  background: '#FAF8F4',
+                  background: 'var(--surface-muted)',
                   border: '1px solid var(--border-light)',
                   borderRadius: '10px',
                   padding: '12px',
@@ -396,7 +396,7 @@ export default function ExportModal({
                 display: 'flex',
                 flexDirection: 'column',
                 gap: '8px',
-                background: '#FAF8F4',
+                background: 'var(--surface-muted)',
                 border: '1px solid var(--border-light)',
                 borderRadius: '12px',
                 padding: '12px'
@@ -418,7 +418,7 @@ export default function ExportModal({
                   borderRadius: '8px',
                   overflow: 'hidden',
                   border: '1px solid var(--border-light)',
-                  background: '#EAE5DA',
+                  background: 'var(--bg-secondary)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center'
@@ -453,7 +453,7 @@ export default function ExportModal({
                       padding: '14px 16px',
                       borderRadius: '10px',
                       border: `1.5px solid ${isSel ? 'var(--accent-pine)' : 'var(--border-light)'}`,
-                      background: isSel ? 'var(--accent-pine-light)' : '#FFFFFF',
+                      background: isSel ? 'var(--accent-pine-light)' : 'var(--bg-elevated)',
                       cursor: 'pointer',
                       display: 'flex',
                       flexDirection: 'column',
@@ -470,8 +470,8 @@ export default function ExportModal({
                           fontWeight: 600,
                           padding: '2px 8px',
                           borderRadius: '6px',
-                          background: isSel ? 'var(--accent-pine)' : '#EFECE4',
-                          color: isSel ? '#FFFFFF' : 'var(--text-main)'
+                          background: isSel ? 'var(--accent-pine)' : 'var(--bg-secondary)',
+                          color: isSel ? 'var(--text-inverse)' : 'var(--text-main)'
                         }}
                       >
                         {fmt.ext}
@@ -487,7 +487,7 @@ export default function ExportModal({
 
             <div
               style={{
-                background: '#FAF8F4',
+                background: 'var(--surface-muted)',
                 border: '1px solid var(--border-light)',
                 borderRadius: '10px',
                 padding: '14px 16px',
@@ -532,7 +532,7 @@ export default function ExportModal({
         {activeTab === 'session' && (
           <div
             style={{
-              background: '#FAF8F4',
+              background: 'var(--surface-muted)',
               border: '1px solid var(--border-light)',
               borderRadius: '12px',
               padding: '20px',

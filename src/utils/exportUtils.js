@@ -1,13 +1,12 @@
 import * as THREE from 'three';
-import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
-import { OBJExporter } from 'three/examples/jsm/exporters/OBJExporter.js';
-import { STLExporter } from 'three/examples/jsm/exporters/STLExporter.js';
 import {
   CAMERA_PROJECTIONS,
   DEFAULT_PHASES,
   LINK_TYPES,
   PIECE_COLORS,
-  PIECE_SHAPES
+  PIECE_SHAPES,
+  TRAY_RADIUS,
+  TRAY_VIEW_SCALE
 } from '../constants';
 import { getPieceDimensions } from './physicsUtils';
 
@@ -34,7 +33,7 @@ export function triggerDownload(urlOrBlob, filename) {
 }
 
 // Calcola il bounding box dei pezzi per centrare le proiezioni ortogonali/prospettiche
-function computePiecesBounds(pieces) {
+export function computePiecesBounds(pieces) {
   const box = new THREE.Box3();
   if (!pieces || pieces.length === 0) {
     box.min.set(-5, 0, -5);
@@ -54,7 +53,7 @@ function computePiecesBounds(pieces) {
 }
 
 // Crea la telecamera per una specifica proiezione di base o clona quella attuale
-function createCameraForProjection(projectionId, aspect, userCamera, userControls, pieces) {
+function createCameraForProjection(projectionId, aspect, userCamera, pieces) {
   const projDef = CAMERA_PROJECTIONS.find((p) => p.id === projectionId) || CAMERA_PROJECTIONS[0];
 
   if (projectionId === 'camera' && userCamera) {
@@ -65,43 +64,48 @@ function createCameraForProjection(projectionId, aspect, userCamera, userControl
   }
 
   const bounds = computePiecesBounds(pieces);
-  const center = bounds.getCenter(new THREE.Vector3());
-  // Mantieni il centro vicino al tavolo ma leggermente centrato sulla configurazione
-  const target = new THREE.Vector3(
-    THREE.MathUtils.clamp(center.x * 0.5, -2.5, 2.5),
-    projDef.target ? projDef.target[1] : 1.0,
-    THREE.MathUtils.clamp(center.z * 0.5, -2.5, 2.5)
-  );
+  const target = new THREE.Vector3(...(projDef.target || [0, 0.5, 0]));
+  const position = new THREE.Vector3(...(projDef.position || [0, 13.5, 15.5]));
+  const direction = position.sub(target);
+  const trayExtent = TRAY_RADIUS + 1.1;
 
   if (projDef.isOrtho) {
-    const halfH = projDef.orthoSize || 10.5;
-    const halfW = halfH * aspect;
-    const orthoCam = new THREE.OrthographicCamera(-halfW, halfW, halfH, -halfH, 0.1, 100);
-    const pos = projDef.position || [0, 20, 0.001];
-    orthoCam.position.set(
-      pos[0] + (projectionId === 'top' ? 0 : target.x * 0.3),
-      pos[1],
-      pos[2] + (projectionId === 'top' ? 0.001 : target.z * 0.3)
-    );
-    if (projectionId === 'top') {
-      orthoCam.up.set(0, 0, -1);
-      orthoCam.lookAt(0, 0, 0);
-    } else {
-      orthoCam.up.set(0, 1, 0);
-      orthoCam.lookAt(target);
+    const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 400);
+    direction.normalize();
+    camera.position.copy(target).addScaledVector(direction, Math.max(42, bounds.max.length() + bounds.min.length() + 8));
+    if (projectionId === 'top') camera.up.set(0, 0, -1);
+    camera.lookAt(target);
+    camera.updateMatrixWorld();
+
+    // Estensione del disco proiettata sugli assi della camera, più gli ingombri dei membri.
+    const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
+    const up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
+    let halfW = trayExtent * Math.hypot(right.x, right.z) + Math.abs(target.y * right.y);
+    let halfH = trayExtent * Math.hypot(up.x, up.z) + Math.abs(target.y * up.y);
+    const corner = new THREE.Vector3();
+    for (const x of [bounds.min.x, bounds.max.x]) {
+      for (const y of [bounds.min.y, bounds.max.y]) {
+        for (const z of [bounds.min.z, bounds.max.z]) {
+          corner.set(x, y, z).sub(target);
+          halfW = Math.max(halfW, Math.abs(corner.dot(right)));
+          halfH = Math.max(halfH, Math.abs(corner.dot(up)));
+        }
+      }
     }
-    orthoCam.updateProjectionMatrix();
-    orthoCam.updateMatrixWorld();
-    return orthoCam;
-  } else {
-    const perspCam = new THREE.PerspectiveCamera(38, aspect, 0.1, 100);
-    const pos = projDef.position || [0, 14, 16];
-    perspCam.position.set(pos[0], pos[1], pos[2]);
-    perspCam.lookAt(target);
-    perspCam.updateProjectionMatrix();
-    perspCam.updateMatrixWorld();
-    return perspCam;
+    halfH = Math.max(halfH, halfW / aspect) * 1.05;
+    camera.left = -halfH * aspect;
+    camera.right = halfH * aspect;
+    camera.top = halfH;
+    camera.bottom = -halfH;
+    camera.updateProjectionMatrix();
+    return camera;
   }
+
+  const camera = new THREE.PerspectiveCamera(38, aspect, 0.1, 400);
+  camera.position.copy(target).addScaledVector(direction, TRAY_VIEW_SCALE / Math.min(aspect, 1));
+  camera.lookAt(target);
+  camera.updateMatrixWorld();
+  return camera;
 }
 
 // Disegna un rettangolo con angoli arrotondati su Canvas 2D
@@ -343,7 +347,6 @@ export function renderProjectionToCanvas({
   renderer,
   scene,
   userCamera,
-  userControls,
   pieces,
   links,
   currentPhaseId,
@@ -361,46 +364,31 @@ export function renderProjectionToCanvas({
   const origPixelRatio = renderer.getPixelRatio();
   const origGazeVisible = gazeIndicator ? gazeIndicator.visible : false;
 
-  // Nascondi temporaneamente il gizmo di selezione durante l'esportazione pulita
-  if (gazeIndicator) gazeIndicator.visible = false;
+  try {
+    if (gazeIndicator) gazeIndicator.visible = false;
+    renderer.setDrawingBufferSize(width, height, 1);
 
-  // Imposta dimensione di rendering richiesta
-  renderer.setPixelRatio(1);
-  renderer.setSize(width, height, false);
-  renderer.shadowMap.needsUpdate = true;
+    const exportCam = createCameraForProjection(projectionId, width / height, userCamera, pieces);
+    renderer.render(scene, exportCam);
 
-  const aspect = width / height;
-  const exportCam = createCameraForProjection(projectionId, aspect, userCamera, userControls, pieces);
+    const outCanvas = document.createElement('canvas');
+    outCanvas.width = width;
+    outCanvas.height = height;
+    const ctx = outCanvas.getContext('2d');
+    ctx.drawImage(renderer.domElement, 0, 0, width, height);
 
-  renderer.render(scene, exportCam);
-
-  // Compositing su canvas 2D
-  const outCanvas = document.createElement('canvas');
-  outCanvas.width = width;
-  outCanvas.height = height;
-  const ctx = outCanvas.getContext('2d');
-
-  ctx.drawImage(renderer.domElement, 0, 0, width, height);
-
-  const scaleFactor = width / 1280;
-
-  if (includeLabels) {
-    drawOverlayLabelsAndGaze(ctx, width, height, exportCam, pieces, projectionId, scaleFactor);
+    const scaleFactor = width / 1280;
+    if (includeLabels) {
+      drawOverlayLabelsAndGaze(ctx, width, height, exportCam, pieces, projectionId, scaleFactor);
+    }
+    if (includeHeader) {
+      drawSingleImageHeaderAndLegend(ctx, width, height, projectionId, currentPhaseId, links, scaleFactor);
+    }
+    return outCanvas;
+  } finally {
+    if (gazeIndicator) gazeIndicator.visible = origGazeVisible;
+    renderer.setDrawingBufferSize(origSize.x, origSize.y, origPixelRatio);
   }
-
-  if (includeHeader) {
-    drawSingleImageHeaderAndLegend(ctx, width, height, projectionId, currentPhaseId, links, scaleFactor);
-  }
-
-  // Ripristina stato originale del renderer
-  if (gazeIndicator) gazeIndicator.visible = origGazeVisible;
-  renderer.setPixelRatio(origPixelRatio);
-  renderer.setSize(origSize.x, origSize.y, false);
-  if (userCamera) {
-    renderer.render(scene, userCamera);
-  }
-
-  return outCanvas;
 }
 
 // Genera una Tavola Sinottica Multi-Proiezione (4 viste cliniche + elenco membri e note + legenda)
@@ -408,7 +396,6 @@ export function renderMultiProjectionSheet({
   renderer,
   scene,
   userCamera,
-  userControls,
   pieces,
   links,
   currentPhaseId,
@@ -495,7 +482,6 @@ export function renderMultiProjectionSheet({
       renderer,
       scene,
       userCamera,
-      userControls,
       pieces,
       links,
       currentPhaseId,
@@ -644,9 +630,14 @@ function buildExportable3DGroup({
   }
 
   if (pieceMeshesMap) {
+    const piecesById = new Map(pieces?.map((piece) => [piece.id, piece]));
     pieceMeshesMap.forEach((meshGroup, pieceId) => {
-      const pieceData = pieces?.find((p) => p.id === pieceId);
+      const pieceData = piecesById.get(pieceId);
       const clonedPiece = meshGroup.clone(true);
+      const { shape, size, color } = pieceData || {};
+      clonedPiece.userData = { pieceId, shape, size, color };
+      const pin = clonedPiece.getObjectByName('front-dot');
+      if (pin) pin.visible = true;
       const safeName = (pieceData?.name || pieceId).replace(/[^a-zA-Z0-9_-]/g, '_');
       clonedPiece.name = `Membro_${safeName}`;
       root.add(clonedPiece);
@@ -666,7 +657,7 @@ function buildExportable3DGroup({
 }
 
 // Esporta la scena 3D nel formato selezionato ('glb' | 'gltf' | 'obj' | 'stl')
-export function exportScene3D({
+export async function exportScene3D({
   format = 'glb',
   pieceMeshesMap,
   linkMeshesMap,
@@ -676,58 +667,34 @@ export function exportScene3D({
   includeTray = true,
   includeLinks = true
 }) {
-  return new Promise((resolve, reject) => {
-    try {
-      const exportGroup = buildExportable3DGroup({
-        pieceMeshesMap,
-        linkMeshesMap,
-        trayGroup,
-        pieces,
-        includeTray,
-        includeLinks
-      });
-
-      const dateStr = new Date().toISOString().slice(0, 10);
-      const baseFilename = `geno3d-${currentPhaseId}-${dateStr}`;
-
-      if (format === 'glb' || format === 'gltf') {
-        const exporter = new GLTFExporter();
-        const isBinary = format === 'glb';
-        exporter.parse(
-          exportGroup,
-          (result) => {
-            if (isBinary) {
-              const blob = new Blob([result], { type: 'model/gltf-binary' });
-              triggerDownload(blob, `${baseFilename}.glb`);
-            } else {
-              const jsonStr = JSON.stringify(result, null, 2);
-              const blob = new Blob([jsonStr], { type: 'model/gltf+json' });
-              triggerDownload(blob, `${baseFilename}.gltf`);
-            }
-            resolve(true);
-          },
-          (error) => {
-            reject(error);
-          },
-          { binary: isBinary }
-        );
-      } else if (format === 'obj') {
-        const exporter = new OBJExporter();
-        const objText = exporter.parse(exportGroup);
-        const blob = new Blob([objText], { type: 'text/plain;charset=utf-8' });
-        triggerDownload(blob, `${baseFilename}.obj`);
-        resolve(true);
-      } else if (format === 'stl') {
-        const exporter = new STLExporter();
-        const stlBuffer = exporter.parse(exportGroup, { binary: true });
-        const blob = new Blob([stlBuffer], { type: 'application/octet-stream' });
-        triggerDownload(blob, `${baseFilename}.stl`);
-        resolve(true);
-      } else {
-        reject(new Error(`Formato 3D non supportato: ${format}`));
-      }
-    } catch (err) {
-      reject(err);
-    }
+  const exportGroup = buildExportable3DGroup({
+    pieceMeshesMap,
+    linkMeshesMap,
+    trayGroup,
+    pieces,
+    includeTray,
+    includeLinks
   });
+
+  const dateStr = new Date().toISOString().slice(0, 10);
+  const filename = `geno3d-${currentPhaseId}-${dateStr}.${format}`;
+  if (format === 'glb' || format === 'gltf') {
+    const { GLTFExporter } = await import('three/examples/jsm/exporters/GLTFExporter.js');
+    const binary = format === 'glb';
+    const result = await new GLTFExporter().parseAsync(exportGroup, { binary });
+    const data = binary ? result : JSON.stringify(result, null, 2);
+    const type = binary ? 'model/gltf-binary' : 'model/gltf+json';
+    triggerDownload(new Blob([data], { type }), filename);
+  } else if (format === 'obj') {
+    const { OBJExporter } = await import('three/examples/jsm/exporters/OBJExporter.js');
+    const data = new OBJExporter().parse(exportGroup);
+    triggerDownload(new Blob([data], { type: 'text/plain;charset=utf-8' }), filename);
+  } else if (format === 'stl') {
+    const { STLExporter } = await import('three/examples/jsm/exporters/STLExporter.js');
+    const data = new STLExporter().parse(exportGroup, { binary: true });
+    triggerDownload(new Blob([data], { type: 'application/octet-stream' }), filename);
+  } else {
+    throw new Error(`Formato 3D non supportato: ${format}`);
+  }
+  return true;
 }

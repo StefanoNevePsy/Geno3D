@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { PIECE_COLORS, PIECE_SIZES, LINK_TYPES } from '../constants';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { getPieceDimensions } from './physicsUtils';
 
 // Cache globali per evitare allocazioni ridondanti e ridurre il consumo energetico GPU/CPU
@@ -566,17 +567,19 @@ export function buildLinkMeshGroup(link, sourcePiece, targetPiece) {
   } else if (linkTypeDef.style === 'dashed') {
     const curve = new THREE.CatmullRomCurve3([p1, midPoint, p2]);
     const dashCount = Math.max(5, Math.min(16, Math.floor(dist * 2.0)));
+    const dashes = [];
     for (let i = 0; i < dashCount; i++) {
       const tStart = (i + 0.15) / dashCount;
       const tEnd = (i + 0.72) / dashCount;
       const ptA = curve.getPoint(tStart);
       const ptB = curve.getPoint(tEnd);
       const segCurve = new THREE.LineCurve3(ptA, ptB);
-      const segGeo = new THREE.TubeGeometry(segCurve, 2, radius * 0.95, 6, false);
-      const segMesh = new THREE.Mesh(segGeo, mat);
-      segMesh.castShadow = true;
-      linkGroup.add(segMesh);
+      dashes.push(new THREE.TubeGeometry(segCurve, 2, radius * 0.95, 6, false));
     }
+    const mesh = new THREE.Mesh(mergeGeometries(dashes), mat);
+    dashes.forEach((geometry) => geometry.dispose());
+    mesh.castShadow = true;
+    linkGroup.add(mesh);
   } else if (linkTypeDef.style === 'double') {
     const steps = 24;
     const strandA = [];
