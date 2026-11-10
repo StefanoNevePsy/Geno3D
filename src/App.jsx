@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useLayoutEffect, useRef } from 'react';
-import { Minus, Move, Plus, RotateCw, SlidersHorizontal } from 'lucide-react';
+import { Columns3, Minus, Move, Plus, RotateCw, SlidersHorizontal } from 'lucide-react';
 import GenoCanvas from './components/GenoCanvas';
 import Header from './components/Header';
 import PieceDrawer from './components/PieceDrawer';
@@ -183,7 +183,8 @@ export default function App() {
   const [isZenMode, setIsZenMode] = useState(false);
   const [isRelationsModalOpen, setIsRelationsModalOpen] = useState(false);
   const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
-  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [exportTab, setExportTab] = useState(null);
+  const isExportModalOpen = exportTab !== null;
   const [isPatientsModalOpen, setIsPatientsModalOpen] = useState(false);
   const [exportApi, setExportApi] = useState(null);
 
@@ -826,7 +827,7 @@ export default function App() {
 
       if (e.key === 'Escape') {
         if (isPatientsModalOpen) setIsPatientsModalOpen(false);
-        else if (isExportModalOpen) setIsExportModalOpen(false);
+        else if (isExportModalOpen) setExportTab(null);
         else if (isRelationsModalOpen) setIsRelationsModalOpen(false);
         else if (isHelpModalOpen) setIsHelpModalOpen(false);
         else if (composerOpen) setComposerOpen(false);
@@ -1006,7 +1007,7 @@ export default function App() {
         onOpenPatientsModal={() => setIsPatientsModalOpen(true)}
         linkCount={currentLinks.length}
         onOpenRelationsModal={() => setIsRelationsModalOpen(true)}
-        onOpenExportModal={() => setIsExportModalOpen(true)}
+        onOpenExportModal={() => setExportTab('images')}
         onImportJson={handleImportJson}
         onClearTray={() => handleClearCurrentPhaseTray(true)}
         onOpenHelpModal={() => setIsHelpModalOpen(true)}
@@ -1052,6 +1053,9 @@ export default function App() {
                   onToggleLabels={() => setShowLabels(!showLabels)}
                 />
               </div>
+              <button type="button" className="btn-scandi geno-compare-open" onClick={() => setExportTab('compare')}>
+                <Columns3 size={15} aria-hidden="true" /> Confronta
+              </button>
               <div className="geno-zoom scandi-panel" role="group" aria-label="Zoom">
                 <button type="button" className="btn-scandi" aria-label="Avvicina" title="Avvicina" onClick={() => setCameraView('zoom-in')}>
                   <Plus size={17} aria-hidden="true" />
@@ -1164,13 +1168,16 @@ export default function App() {
         preselectedSourceId={selectedPieceId}
       />
 
-      <ExportModal
-        isOpen={isExportModalOpen}
-        onClose={() => setIsExportModalOpen(false)}
-        exportApi={exportApi}
-        currentPhaseId={currentPhaseId}
-        onExportJson={() => handleExportSingleRecord(activeRecordId)}
-      />
+      {exportTab && (
+        <ExportModal
+          initialTab={exportTab}
+          onClose={() => setExportTab(null)}
+          exportApi={exportApi}
+          currentPhaseId={currentPhaseId}
+          phasesData={phasesData}
+          onExportJson={() => handleExportSingleRecord(activeRecordId)}
+        />
+      )}
 
       <HelpModal
         isOpen={isHelpModalOpen}

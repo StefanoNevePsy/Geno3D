@@ -784,6 +784,7 @@ export default function GenoCanvas({
 
     const api = {
       queuePiecePreview,
+      getComparisonTray: () => trayGroupRef.current,
       // Restituisce i vettori unitari "avanti" e "destra" sul piano orizzontale XZ rispetto alla telecamera attuale
       getCameraHorizontalAxes: () => {
         const cam = cameraRef.current;
@@ -811,7 +812,8 @@ export default function GenoCanvas({
         width = 1920,
         height = 1440,
         includeLabels = true,
-        includeHeader = true
+        includeHeader = true,
+        framing = 'pieces'
       }) => {
         wakeUpRenderRef.current();
         const canvas = renderProjectionToCanvas({
@@ -826,12 +828,13 @@ export default function GenoCanvas({
           height,
           includeLabels,
           includeHeader,
-          gazeIndicator: gazeIndicatorRef.current
+          gazeIndicator: gazeIndicatorRef.current,
+          framing
         });
         return canvas ? canvas.toDataURL('image/png') : null;
       },
 
-      renderCompositeSheetDataUrl: ({ includeLabels = true, resolutionScale = 1 } = {}) => {
+      renderCompositeSheetDataUrl: ({ includeLabels = true, resolutionScale = 1, framing = 'pieces' } = {}) => {
         wakeUpRenderRef.current();
         const canvas = renderMultiProjectionSheet({
           renderer: rendererRef.current,
@@ -842,7 +845,8 @@ export default function GenoCanvas({
           currentPhaseId,
           includeLabels,
           gazeIndicator: gazeIndicatorRef.current,
-          resolutionScale
+          resolutionScale,
+          framing
         });
         return canvas ? canvas.toDataURL('image/png') : null;
       },
@@ -852,7 +856,8 @@ export default function GenoCanvas({
         width = 1920,
         height = 1440,
         includeLabels = true,
-        includeHeader = true
+        includeHeader = true,
+        framing = 'pieces'
       }) => {
         const dateStr = new Date().toISOString().slice(0, 10);
         for (let i = 0; i < projectionIds.length; i++) {
@@ -862,7 +867,8 @@ export default function GenoCanvas({
             width,
             height,
             includeLabels,
-            includeHeader
+            includeHeader,
+            framing
           });
           if (dataUrl) {
             triggerDownload(dataUrl, `geno3d-${currentPhaseId}-${pid}-${dateStr}.png`);
@@ -873,9 +879,9 @@ export default function GenoCanvas({
         }
       },
 
-      downloadCompositeSheet: ({ includeLabels = true, resolutionScale = 1 } = {}) => {
+      downloadCompositeSheet: ({ includeLabels = true, resolutionScale = 1, framing = 'pieces' } = {}) => {
         const dateStr = new Date().toISOString().slice(0, 10);
-        const dataUrl = api.renderCompositeSheetDataUrl({ includeLabels, resolutionScale });
+        const dataUrl = api.renderCompositeSheetDataUrl({ includeLabels, resolutionScale, framing });
         if (dataUrl) {
           triggerDownload(dataUrl, `geno3d-${currentPhaseId}-tavola-proiezioni-${dateStr}.png`);
         }

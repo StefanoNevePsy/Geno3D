@@ -5,8 +5,7 @@ import {
   LINK_TYPES,
   PIECE_COLORS,
   PIECE_SHAPES,
-  TRAY_RADIUS,
-  TRAY_VIEW_SCALE
+  TRAY_RADIUS
 } from '../constants';
 import { getPieceDimensions } from './physicsUtils';
 
@@ -53,57 +52,63 @@ export function computePiecesBounds(pieces) {
 }
 
 // Crea la telecamera per una specifica proiezione di base o clona quella attuale
-function createCameraForProjection(projectionId, aspect, userCamera, pieces) {
-  const projDef = CAMERA_PROJECTIONS.find((p) => p.id === projectionId) || CAMERA_PROJECTIONS[0];
-
-  if (projectionId === 'camera' && userCamera) {
-    const cam = userCamera.clone();
-    cam.aspect = aspect;
-    cam.updateProjectionMatrix();
-    return cam;
-  }
-
-  const bounds = computePiecesBounds(pieces);
-  const target = new THREE.Vector3(...(projDef.target || [0, 0.5, 0]));
-  const position = new THREE.Vector3(...(projDef.position || [0, 13.5, 15.5]));
-  const direction = position.sub(target);
-  const trayExtent = TRAY_RADIUS + 1.1;
-
-  if (projDef.isOrtho) {
-    const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 400);
-    direction.normalize();
-    camera.position.copy(target).addScaledVector(direction, Math.max(42, bounds.max.length() + bounds.min.length() + 8));
-    if (projectionId === 'top') camera.up.set(0, 0, -1);
-    camera.lookAt(target);
-    camera.updateMatrixWorld();
-
-    // Estensione del disco proiettata sugli assi della camera, più gli ingombri dei membri.
-    const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
-    const up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
-    let halfW = trayExtent * Math.hypot(right.x, right.z) + Math.abs(target.y * right.y);
-    let halfH = trayExtent * Math.hypot(up.x, up.z) + Math.abs(target.y * up.y);
-    const corner = new THREE.Vector3();
-    for (const x of [bounds.min.x, bounds.max.x]) {
-      for (const y of [bounds.min.y, bounds.max.y]) {
-        for (const z of [bounds.min.z, bounds.max.z]) {
-          corner.set(x, y, z).sub(target);
-          halfW = Math.max(halfW, Math.abs(corner.dot(right)));
-          halfH = Math.max(halfH, Math.abs(corner.dot(up)));
-        }
-      }
-    }
-    halfH = Math.max(halfH, halfW / aspect) * 1.05;
-    camera.left = -halfH * aspect;
-    camera.right = halfH * aspect;
-    camera.top = halfH;
-    camera.bottom = -halfH;
+export function createCameraForProjection(projectionId, aspect, userCamera, pieces, framing = 'pieces') {
+  const preset = CAMERA_PROJECTIONS.find((item) => item.id === projectionId);
+  if (projectionId === 'camera' && userCamera && framing === 'tray') {
+    const camera = userCamera.clone();
+    camera.aspect = aspect;
     camera.updateProjectionMatrix();
+    camera.updateMatrixWorld();
     return camera;
   }
 
-  const camera = new THREE.PerspectiveCamera(38, aspect, 0.1, 400);
-  camera.position.copy(target).addScaledVector(direction, TRAY_VIEW_SCALE / Math.min(aspect, 1));
-  camera.lookAt(target);
+  const full = framing === 'tray' || pieces.length === 0;
+  const bounds = computePiecesBounds(pieces);
+  if (full) {
+    const radius = TRAY_RADIUS + 0.95;
+    bounds.expandByPoint(new THREE.Vector3(-radius, -0.45, -radius));
+    bounds.expandByPoint(new THREE.Vector3(radius, 0, radius));
+  }
+  const center = bounds.getCenter(new THREE.Vector3());
+  const direction = new THREE.Vector3(...(preset?.position || [13.5, 13.5, 13.5]))
+    .sub(new THREE.Vector3(...(preset?.target || [0, 0.8, 0]))).normalize();
+  if (projectionId === 'camera' && userCamera) userCamera.getWorldDirection(direction).negate();
+
+  const camera = preset?.isOrtho || projectionId !== 'camera'
+    ? new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 800)
+    : new THREE.PerspectiveCamera(38, aspect, 0.1, 800);
+  if (projectionId === 'top') camera.up.set(0, 0, -1);
+  camera.position.copy(center).addScaledVector(direction, Math.max(60, bounds.min.distanceTo(bounds.max) + 10));
+  camera.lookAt(center);
+  camera.updateMatrixWorld();
+
+  const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
+  const up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
+  const corner = new THREE.Vector3();
+  const tan = Math.tan(THREE.MathUtils.degToRad(19));
+  let halfHeight = 1.5;
+  let distance = 5;
+  for (const x of [bounds.min.x, bounds.max.x]) {
+    for (const y of [bounds.min.y, bounds.max.y]) {
+      for (const z of [bounds.min.z, bounds.max.z]) {
+        corner.set(x, y, z).sub(center);
+        const halfExtent = Math.max(Math.abs(corner.dot(right)) / aspect, Math.abs(corner.dot(up)));
+        halfHeight = Math.max(halfHeight, halfExtent);
+        distance = Math.max(distance, halfExtent * 1.28 / tan + corner.dot(direction));
+      }
+    }
+  }
+
+  if (camera.isOrthographicCamera) {
+    halfHeight *= 1.27;
+    camera.left = -halfHeight * aspect;
+    camera.right = halfHeight * aspect;
+    camera.top = halfHeight;
+    camera.bottom = -halfHeight;
+  } else {
+    camera.position.copy(center).addScaledVector(direction, distance);
+  }
+  camera.updateProjectionMatrix();
   camera.updateMatrixWorld();
   return camera;
 }
@@ -125,7 +130,7 @@ function roundRect(ctx, x, y, w, h, r) {
 }
 
 // Disegna le etichette 2D dei membri e le frecce di sguardo (in pianta) sopra al render WebGL
-function drawOverlayLabelsAndGaze(ctx, width, height, camera, pieces, projectionId, scaleFactor = 1) {
+export function drawOverlayLabelsAndGaze(ctx, width, height, camera, pieces, projectionId, scaleFactor = 1) {
   if (!pieces || pieces.length === 0) return;
 
   camera.updateMatrixWorld();
@@ -187,7 +192,7 @@ function drawOverlayLabelsAndGaze(ctx, width, height, camera, pieces, projection
     const dims = getPieceDimensions(p);
     const labelWorldPos =
       projectionId === 'top'
-        ? new THREE.Vector3(p.x, (p.y || 0) + dims.height, p.z + dims.collisionRadius + 0.45)
+        ? new THREE.Vector3(p.x, (p.y || 0) + dims.height, p.z + dims.collisionRadius + 0.19)
         : new THREE.Vector3(p.x, (p.y || 0) + dims.height + 0.42, p.z);
 
     const screenPos = labelWorldPos.clone().project(camera);
@@ -197,7 +202,7 @@ function drawOverlayLabelsAndGaze(ctx, width, height, camera, pieces, projection
     const y = ((-screenPos.y + 1) * height) / 2;
 
     const nameText = p.name || 'Senza nome';
-    const roleText = p.role || '';
+    const roleText = projectionId === 'top' ? '' : (p.role || '');
 
     ctx.save();
     const fontNameSize = Math.round(13 * scaleFactor);
@@ -214,11 +219,12 @@ function drawOverlayLabelsAndGaze(ctx, width, height, camera, pieces, projection
 
     const padX = 11 * scaleFactor;
     const padY = 6 * scaleFactor;
-    const boxW = Math.max(nameWidth, roleWidth) + padX * 2;
+    const boxW = Math.min(Math.max(nameWidth, roleWidth) + padX * 2, width * 0.34);
     const boxH = roleText ? (fontNameSize + fontRoleSize + padY * 2.2) : (fontNameSize + padY * 2);
 
-    const bx = x - boxW / 2;
-    const by = projectionId === 'top' ? y - boxH / 2 : y - boxH - 5 * scaleFactor;
+    const bx = Math.max(2, Math.min(width - boxW - 2, x - boxW / 2));
+    const labelTop = projectionId === 'top' ? y - boxH / 2 : y - boxH - 5 * scaleFactor;
+    const by = Math.max(2, Math.min(height - boxH - 2, labelTop));
 
     // Ombra morbida
     ctx.shadowColor = 'rgba(29, 36, 33, 0.14)';
@@ -246,13 +252,13 @@ function drawOverlayLabelsAndGaze(ctx, width, height, camera, pieces, projection
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
     ctx.font = `600 ${fontNameSize}px "Plus Jakarta Sans", -apple-system, sans-serif`;
-    ctx.fillText(nameText, x + 2 * scaleFactor, by + padY);
+    ctx.fillText(nameText, bx + boxW / 2 + 2 * scaleFactor, by + padY, boxW - padX * 2);
 
     // Testo Ruolo
     if (roleText) {
       ctx.fillStyle = '#667069';
       ctx.font = `400 ${fontRoleSize}px "Plus Jakarta Sans", -apple-system, sans-serif`;
-      ctx.fillText(roleText, x, by + padY + fontNameSize + 2 * scaleFactor);
+      ctx.fillText(roleText, bx + boxW / 2, by + padY + fontNameSize + 2 * scaleFactor, boxW - padX * 2);
     }
 
     ctx.restore();
@@ -355,7 +361,8 @@ export function renderProjectionToCanvas({
   height = 1440,
   includeLabels = true,
   includeHeader = true,
-  gazeIndicator = null
+  gazeIndicator = null,
+  framing = 'pieces'
 }) {
   if (!renderer || !scene) return null;
 
@@ -366,23 +373,33 @@ export function renderProjectionToCanvas({
 
   try {
     if (gazeIndicator) gazeIndicator.visible = false;
-    renderer.setDrawingBufferSize(width, height, 1);
+    const scaleFactor = width / 950;
+    const headerScale = width / 1280;
+    const legendRows = LINK_TYPES.filter(({ id }) => links.some(({ type }) => type === id)).length;
+    const top = includeHeader ? Math.round(84 * headerScale) : 0;
+    const bottom = includeHeader && legendRows ? Math.round((56 + legendRows * 20) * headerScale) : 0;
+    const frameHeight = height - top - bottom;
+    renderer.setDrawingBufferSize(width, frameHeight, 1);
 
-    const exportCam = createCameraForProjection(projectionId, width / height, userCamera, pieces);
+    const exportCam = createCameraForProjection(projectionId, width / frameHeight, userCamera, pieces, framing);
     renderer.render(scene, exportCam);
 
     const outCanvas = document.createElement('canvas');
     outCanvas.width = width;
     outCanvas.height = height;
     const ctx = outCanvas.getContext('2d');
-    ctx.drawImage(renderer.domElement, 0, 0, width, height);
+    ctx.fillStyle = '#f5f2eb';
+    ctx.fillRect(0, 0, width, height);
+    ctx.drawImage(renderer.domElement, 0, top, width, frameHeight);
 
-    const scaleFactor = width / 1280;
     if (includeLabels) {
-      drawOverlayLabelsAndGaze(ctx, width, height, exportCam, pieces, projectionId, scaleFactor);
+      ctx.save();
+      ctx.translate(0, top);
+      drawOverlayLabelsAndGaze(ctx, width, frameHeight, exportCam, pieces, projectionId, scaleFactor);
+      ctx.restore();
     }
     if (includeHeader) {
-      drawSingleImageHeaderAndLegend(ctx, width, height, projectionId, currentPhaseId, links, scaleFactor);
+      drawSingleImageHeaderAndLegend(ctx, width, height, projectionId, currentPhaseId, links, headerScale);
     }
     return outCanvas;
   } finally {
@@ -401,7 +418,8 @@ export function renderMultiProjectionSheet({
   currentPhaseId,
   includeLabels = true,
   gazeIndicator = null,
-  resolutionScale = 1
+  resolutionScale = 1,
+  framing = 'pieces'
 }) {
   const sheetW = Math.round(2400 * resolutionScale);
   const sheetH = Math.round(1800 * resolutionScale);
@@ -490,7 +508,8 @@ export function renderMultiProjectionSheet({
       height: cellH,
       includeLabels,
       includeHeader: false,
-      gazeIndicator
+      gazeIndicator,
+      framing
     });
 
     ctx.save();
