@@ -100,7 +100,7 @@ export default function Header({
                   fontWeight: 600
                 }}
               >
-                Bassoli &amp; Mariotti
+                Dr. Mariotti Mauro
               </span>
             </div>
             <span className="geno-brand-caption" style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block' }}>
